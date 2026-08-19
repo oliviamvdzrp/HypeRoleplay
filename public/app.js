@@ -1,12 +1,20 @@
-const $ = s => document.querySelector(s);
-const params = new URLSearchParams(location.search);
+const $ = (selector) => document.querySelector(selector);
+
+const params = new URLSearchParams(window.location.search);
+
 let roomId = params.get("room") || "";
 let myId = null;
 let myName = "";
 let socket = null;
-let sharing = false;
+
+let localMicStream = null;
+let localScreenStream = null;
+
 let micOn = false;
-let localScreen = null;
+let sharing = false;
+let mutedAll = false;
+let isHost = false;
+
 const peers = new Map();
 
 const iceServers = [
@@ -14,361 +22,1655 @@ const iceServers = [
   { urls: "stun:stun.cloudflare.com:3478" }
 ];
 
-function toast(text) {
-  const el = $("#toast");
-  el.textContent = text;
-  el.classList.add("show");
-  clearTimeout(window.__toast);
-  window.__toast = setTimeout(() => el.classList.remove("show"), 2500);
+/* =========================
+   UTILIDADES
+========================= */
+
+function toast(message) {
+  const element = $("#toast");
+
+  if (!element) {
+    alert(message);
+    return;
+  }
+
+  element.textContent = message;
+  element.classList.add("show");
+
+  clearTimeout(window.__toastTimer);
+
+  window.__toastTimer = setTimeout(() => {
+    element.classList.remove("show");
+  }, 3000);
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => {
+    return {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#039;"
+    }[char];
+  });
+}
+
+function normalizeRoom(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, "")
+    .slice(0, 32);
 }
 
 function randomRoom() {
-  return Math.random().toString(36).slice(2, 8).toUpperCase();
+  return Math.random()
+    .toString(36)
+    .substring(2, 8)
+    .toUpperCase();
 }
 
-function normalizeRoom(v) {
-  return v.trim().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 32);
+function showHome() {
+  $("#home")?.classList.remove("hidden");
+  $("#room")?.classList.add("hidden");
 }
+
+function showRoom() {
+  $("#home")?.classList.add("hidden");
+  $("#room")?.classList.remove("hidden");
+}
+
+function updateStatus(text) {
+  const status = $("#roomStatus");
+
+  if (status) {
+    status.textContent = text;
+  }
+}
+
+/* =========================
+   WEBSOCKET
+========================= */
 
 function connect() {
-  const proto = location.protocol === "https:" ? "wss" : "ws";
-  socket = new WebSocket(`${proto}://${location.host}`);
+  if (!roomId) {
+    toast("Sala inválida.");
+    return;
+  }
+
+  const protocol =
+    window.location.protocol === "https:"
+      ? "wss:"
+      : "ws:";
+
+  socket = new WebSocket(
+    `${protocol}//${window.location.host}`
+  );
 
   socket.onopen = () => {
-    socket.send(JSON.stringify({ type: "join", room: roomId, name: myName }));
-    $("#roomStatus").textContent = "Conectado";
+    updateStatus("Conectando...");
+
+    socket.send(
+      JSON.stringify({
+        type: "join",
+        room: roomId,
+        name: myName,
+        password: window.__roomPassword || ""
+      })
+    );
+  };
+
+  socket.onerror = () => {
+    toast("Não foi possível conectar ao servidor.");
   };
 
   socket.onclose = () => {
-    $("#roomStatus").textContent = "Desconectado";
-    toast("Conexão perdida. Recarregue a página para tentar novamente.");
+    updateStatus("Desconectado");
   };
 
-  socket.onerror = () => toast("Não foi possível conectar ao servidor.");
+  socket.onmessage = async (event) => {
+    let message;
 
-  socket.onmessage = async event => {
-    const msg = JSON.parse(event.data);
-
-    if (msg.type === "error") {
-      toast(msg.message);
+    try {
+      message = JSON.parse(event.data);
+    } catch {
       return;
     }
 
-    if (msg.type === "joined") {
-      myId = msg.peerId;
-      $("#roomCode").textContent = msg.room;
-      renderParticipants(msg.participants);
-      // O novo participante cria conexões com quem já estava na sala.
-      for (const p of msg.participants) {
-        if (p.peerId !== myId) {
-          const pc = createPeer(p.peerId, p.name, true);
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          sendSignal(p.peerId, { sdp: pc.localDescription });
-        }
+    await handleMessage(message);
+  };
+}
+
+/* =========================
+   MENSAGENS DO SERVIDOR
+========================= */
+
+async function handleMessage(message) {
+  switch (message.type) {
+
+    case "error":
+      toast(message.message);
+      return;
+
+    case "password-required": {
+      const password = prompt(
+        "🔐 Esta sala possui uma senha.\nDigite a senha:"
+      );
+
+      if (password === null) {
+        return;
       }
+
+      window.__roomPassword = password;
+
+      if (socket?.readyState === WebSocket.OPEN) {
+        socket.send(
+          JSON.stringify({
+            type: "join",
+            room: roomId,
+            name: myName,
+            password
+          })
+        );
+      }
+
       return;
     }
 
-    if (msg.type === "participant-joined") {
-      addParticipant(msg.participant);
+    case "joined":
+      await handleJoined(message);
       return;
-    }
 
-    if (msg.type === "participant-updated") {
-      updateParticipant(msg.participant);
+    case "participant-joined":
+      addParticipant(message.participant);
       return;
-    }
 
-    if (msg.type === "participant-left") {
-      removePeer(msg.peerId);
+    case "participant-left":
+      removePeer(message.peerId);
       return;
-    }
 
-    if (msg.type === "signal") {
-      await handleSignal(msg);
+    case "participants":
+      renderParticipants(message.participants || []);
+
+      mutedAll = !!message.mutedAll;
+
+      updateMuteAllButton();
+
       return;
-    }
 
-    if (msg.type === "chat") {
-      addChat(msg.from, msg.text, msg.from === myName);
-    }
-  };
+    case "participant-updated":
+      updateParticipant(message.participant);
+      return;
+
+    case "signal":
+      await handleSignal(message);
+      return;
+
+    case "chat":
+      addChat(
+        message.from,
+        message.text,
+        message.peerId === myId
+      );
+      return;
+
+    case "mute-all":
+      mutedAll = !!message.value;
+
+      if (mutedAll) {
+        forceMuteLocal();
+        toast("🔇 Todos os microfones foram mutados.");
+      } else {
+        toast("🎙️ O mute geral foi desativado.");
+      }
+
+      updateMuteAllButton();
+
+      return;
+
+    case "force-mute":
+      forceMuteLocal();
+      toast("🔇 Seu microfone foi mutado pelo administrador.");
+      return;
+
+    case "host-changed":
+      isHost = !!message.host;
+      updateHostControls();
+
+      if (isHost) {
+        toast("👑 Você agora é o administrador da sala.");
+      }
+
+      return;
+  }
 }
 
-function sendSignal(to, signal) {
-  if (socket?.readyState === 1)
-    socket.send(JSON.stringify({ type: "signal", to, signal }));
+/* =========================
+   ENTRADA NA SALA
+========================= */
+
+async function handleJoined(message) {
+  myId = message.peerId;
+  roomId = message.room;
+
+  isHost = !!message.host;
+  mutedAll = !!message.mutedAll;
+
+  history.replaceState(
+    {},
+    "",
+    `?room=${encodeURIComponent(roomId)}`
+  );
+
+  showRoom();
+
+  $("#roomCode").textContent = roomId;
+
+  updateStatus("Conectado");
+
+  renderParticipants(message.participants || []);
+
+  updateHostControls();
+  updateMuteAllButton();
+
+  /*
+   * Cria uma conexão WebRTC com cada participante
+   * que já estava na sala.
+   */
+  for (const participant of message.participants || []) {
+    if (participant.peerId === myId) {
+      continue;
+    }
+
+    const pc = createPeer(
+      participant.peerId,
+      participant.name,
+      true
+    );
+
+    try {
+      const offer = await pc.createOffer();
+
+      await pc.setLocalDescription(offer);
+
+      sendSignal(
+        participant.peerId,
+        {
+          sdp: pc.localDescription
+        }
+      );
+    } catch (error) {
+      console.error("Erro criando offer:", error);
+    }
+  }
 }
+
+/* =========================
+   WEBRTC
+========================= */
 
 function createPeer(peerId, name, initiator = false) {
-  if (peers.has(peerId)) return peers.get(peerId).pc;
+  if (peers.has(peerId)) {
+    return peers.get(peerId).pc;
+  }
 
-  const pc = new RTCPeerConnection({ iceServers });
-  const state = { pc, name, stream: null, candidateQueue: [] };
-  peers.set(peerId, state);
+  const pc = new RTCPeerConnection({
+    iceServers
+  });
 
-  pc.onicecandidate = e => {
-    if (e.candidate) sendSignal(peerId, { candidate: e.candidate });
+  const state = {
+    pc,
+    name,
+    stream: null,
+    candidateQueue: []
   };
 
-  pc.ontrack = e => {
-    const stream = e.streams[0];
+  peers.set(peerId, state);
+
+  pc.onicecandidate = (event) => {
+    if (!event.candidate) {
+      return;
+    }
+
+    sendSignal(peerId, {
+      candidate: event.candidate
+    });
+  };
+
+  pc.ontrack = (event) => {
+    const stream =
+      event.streams?.[0] ||
+      state.stream ||
+      new MediaStream();
+
+    if (!event.streams?.[0]) {
+      stream.addTrack(event.track);
+    }
+
     state.stream = stream;
-    attachRemote(peerId, name, stream);
+
+    attachRemote(
+      peerId,
+      name,
+      stream
+    );
+
     hideEmpty();
   };
 
   pc.onconnectionstatechange = () => {
-    if (["failed","closed","disconnected"].includes(pc.connectionState)) {
-      if (pc.connectionState === "failed") pc.restartIce();
+    const stateName = pc.connectionState;
+
+    if (stateName === "failed") {
+      try {
+        pc.restartIce();
+      } catch {}
+    }
+
+    if (
+      stateName === "closed" ||
+      stateName === "disconnected"
+    ) {
+      setTimeout(() => {
+        if (
+          pc.connectionState === "disconnected"
+        ) {
+          removePeer(peerId);
+        }
+      }, 5000);
     }
   };
 
-  if (localScreen) {
-    for (const track of localScreen.getTracks()) pc.addTrack(track, localScreen);
+  /*
+   * Se já estamos compartilhando,
+   * adiciona nossa tela nessa nova conexão.
+   */
+  if (localScreenStream) {
+    for (const track of localScreenStream.getTracks()) {
+      pc.addTrack(
+        track,
+        localScreenStream
+      );
+    }
+  }
+
+  /*
+   * Se já temos microfone,
+   * adiciona o áudio nessa conexão.
+   */
+  if (
+    localMicStream &&
+    micOn &&
+    !mutedAll
+  ) {
+    for (const track of localMicStream.getTracks()) {
+      pc.addTrack(
+        track,
+        localMicStream
+      );
+    }
   }
 
   return pc;
 }
 
-async function handleSignal(msg) {
-  const { from, fromName, signal } = msg;
-  const pc = createPeer(from, fromName, false);
+async function handleSignal(message) {
+  const {
+    from,
+    fromName,
+    signal
+  } = message;
+
+  const pc = createPeer(
+    from,
+    fromName || "Participante",
+    false
+  );
+
   const state = peers.get(from);
 
-  try {
-    if (signal.sdp) {
-      await pc.setRemoteDescription(signal.sdp);
-      while (state.candidateQueue.length) {
-        await pc.addIceCandidate(state.candidateQueue.shift());
-      }
-
-      if (signal.sdp.type === "offer") {
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        sendSignal(from, { sdp: pc.localDescription });
-      }
-    } else if (signal.candidate) {
-      if (pc.remoteDescription) await pc.addIceCandidate(signal.candidate);
-      else state.candidateQueue.push(signal.candidate);
-    }
-  } catch (err) {
-    console.error("WebRTC signal error", err);
-  }
-}
-
-function attachRemote(peerId, name, stream) {
-  let card = document.querySelector(`[data-peer="${peerId}"]`);
-  if (!card) {
-    card = document.createElement("div");
-    card.className = "video-card";
-    card.dataset.peer = peerId;
-    card.innerHTML = `<video autoplay playsinline></video><div class="video-name"></div>`;
-    $("#videos").appendChild(card);
-  }
-  card.querySelector("video").srcObject = stream;
-  card.querySelector(".video-name").textContent = name + " · transmitindo";
-}
-
-function removePeer(peerId) {
-  const state = peers.get(peerId);
-  if (state) {
-    try { state.pc.close(); } catch {}
-    peers.delete(peerId);
-  }
-  document.querySelector(`[data-peer="${peerId}"]`)?.remove();
-  renderParticipantsFromDOM();
-  if (!$("#videos").children.length) showEmpty();
-}
-
-function hideEmpty() { $("#emptyState").classList.add("hidden"); }
-function showEmpty() { if (!$("#videos").children.length) $("#emptyState").classList.remove("hidden"); }
-
-async function startShare() {
-  if (!navigator.mediaDevices?.getDisplayMedia) {
-    toast("Seu navegador não oferece compartilhamento de tela aqui.");
+  if (!state) {
     return;
   }
 
   try {
-    localScreen = await navigator.mediaDevices.getDisplayMedia({
-      video: {
-        cursor: "always",
-        frameRate: { ideal: 30, max: 60 }
-      },
-      audio: true
+
+    if (signal.sdp) {
+
+      await pc.setRemoteDescription(
+        new RTCSessionDescription(signal.sdp)
+      );
+
+      while (
+        state.candidateQueue.length
+      ) {
+        const candidate =
+          state.candidateQueue.shift();
+
+        try {
+          await pc.addIceCandidate(candidate);
+        } catch {}
+      }
+
+      if (
+        signal.sdp.type === "offer"
+      ) {
+        const answer =
+          await pc.createAnswer();
+
+        await pc.setLocalDescription(
+          answer
+        );
+
+        sendSignal(
+          from,
+          {
+            sdp: pc.localDescription
+          }
+        );
+      }
+
+      return;
+    }
+
+    if (signal.candidate) {
+
+      const candidate =
+        new RTCIceCandidate(
+          signal.candidate
+        );
+
+      if (pc.remoteDescription) {
+        await pc.addIceCandidate(
+          candidate
+        );
+      } else {
+        state.candidateQueue.push(
+          candidate
+        );
+      }
+    }
+
+  } catch (error) {
+    console.error(
+      "Erro WebRTC:",
+      error
+    );
+  }
+}
+
+function sendSignal(to, signal) {
+  if (
+    socket &&
+    socket.readyState === WebSocket.OPEN
+  ) {
+    socket.send(
+      JSON.stringify({
+        type: "signal",
+        to,
+        signal
+      })
+    );
+  }
+}
+
+/* =========================
+   VÍDEOS REMOTOS
+========================= */
+
+function attachRemote(
+  peerId,
+  name,
+  stream
+) {
+  let card =
+    document.querySelector(
+      `[data-peer="${peerId}"]`
+    );
+
+  if (!card) {
+
+    card =
+      document.createElement("div");
+
+    card.className =
+      "video-card";
+
+    card.dataset.peer =
+      peerId;
+
+    card.innerHTML = `
+      <video
+        autoplay
+        playsinline
+      ></video>
+
+      <div class="video-name">
+        ${escapeHtml(name)}
+      </div>
+    `;
+
+    $("#videos")?.appendChild(card);
+  }
+
+  const video =
+    card.querySelector("video");
+
+  if (video) {
+    if (
+      video.srcObject !== stream
+    ) {
+      video.srcObject = stream;
+    }
+
+    video.autoplay = true;
+    video.playsInline = true;
+
+    video.play().catch(() => {
+      /*
+       * Alguns navegadores bloqueiam
+       * autoplay de áudio.
+       */
     });
+  }
+
+  const nameElement =
+    card.querySelector(
+      ".video-name"
+    );
+
+  if (nameElement) {
+    nameElement.textContent =
+      `${name} · transmitindo`;
+  }
+}
+
+function removePeer(peerId) {
+  const state =
+    peers.get(peerId);
+
+  if (state) {
+    try {
+      state.pc.close();
+    } catch {}
+
+    peers.delete(peerId);
+  }
+
+  document
+    .querySelector(
+      `[data-peer="${peerId}"]`
+    )
+    ?.remove();
+
+  renderParticipantsFromDOM();
+
+  showEmpty();
+}
+
+function hideEmpty() {
+  $("#emptyState")
+    ?.classList.add("hidden");
+}
+
+function showEmpty() {
+  const videos =
+    $("#videos");
+
+  if (
+    videos &&
+    videos.children.length === 0
+  ) {
+    $("#emptyState")
+      ?.classList.remove("hidden");
+  }
+}
+
+/* =========================
+   COMPARTILHAMENTO DE TELA
+========================= */
+
+async function startShare() {
+
+  if (
+    !navigator.mediaDevices?.getDisplayMedia
+  ) {
+    toast(
+      "Seu navegador não suporta compartilhamento de tela."
+    );
+
+    return;
+  }
+
+  if (sharing) {
+    return;
+  }
+
+  try {
+
+    const stream =
+      await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          cursor: "always",
+          frameRate: {
+            ideal: 30,
+            max: 60
+          }
+        },
+        audio: true
+      });
+
+    localScreenStream =
+      stream;
 
     sharing = true;
-    $("#shareBtn").classList.add("hidden");
-    $("#stopShareBtn").classList.remove("hidden");
+
     hideEmpty();
 
-    for (const [peerId, state] of peers) {
-      for (const sender of state.pc.getSenders()) {
-        if (sender.track?.kind === "video") {
-          const track = localScreen.getVideoTracks()[0];
-          await sender.replaceTrack(track);
+    updateShareButtons();
+
+    /*
+     * Coloca a nossa própria transmissão
+     * na tela.
+     */
+    attachLocalPreview(
+      stream
+    );
+
+    /*
+     * Envia tela para TODOS os participantes.
+     */
+    for (
+      const [
+        peerId,
+        state
+      ] of peers
+    ) {
+
+      const videoTrack =
+        stream.getVideoTracks()[0];
+
+      const audioTrack =
+        stream.getAudioTracks()[0];
+
+      const videoSender =
+        state.pc
+          .getSenders()
+          .find(
+            sender =>
+              sender.track?.kind === "video"
+          );
+
+      if (videoSender) {
+
+        await videoSender.replaceTrack(
+          videoTrack
+        );
+
+      } else {
+
+        state.pc.addTrack(
+          videoTrack,
+          stream
+        );
+      }
+
+      /*
+       * ÁUDIO DA TELA
+       */
+      if (audioTrack) {
+
+        const audioSender =
+          state.pc
+            .getSenders()
+            .find(
+              sender =>
+                sender.track?.kind === "audio"
+            );
+
+        if (audioSender) {
+
+          await audioSender.replaceTrack(
+            audioTrack
+          );
+
+        } else {
+
+          /*
+           * Se já existe áudio do microfone,
+           * precisamos criar uma negociação.
+           */
+          state.pc.addTrack(
+            audioTrack,
+            stream
+          );
         }
       }
-      // Se a conexão foi criada sem track local, adiciona o novo track.
-      const hasVideo = state.pc.getSenders().some(s => s.track?.kind === "video");
-      if (!hasVideo) {
-        for (const track of localScreen.getTracks()) state.pc.addTrack(track, localScreen);
-        const offer = await state.pc.createOffer();
-        await state.pc.setLocalDescription(offer);
-        sendSignal(peerId, { sdp: state.pc.localDescription });
-      }
+
+      const offer =
+        await state.pc.createOffer();
+
+      await state.pc.setLocalDescription(
+        offer
+      );
+
+      sendSignal(
+        peerId,
+        {
+          sdp: state.pc.localDescription
+        }
+      );
     }
 
-    const screenTrack = localScreen.getVideoTracks()[0];
-    screenTrack.onended = stopShare;
-    socket.send(JSON.stringify({ type: "sharing", value: true }));
-    updateParticipant({ peerId: myId, name: myName, sharing: true });
-    toast("Sua tela está sendo compartilhada.");
-  } catch (err) {
-    if (err.name !== "AbortError" && err.name !== "NotAllowedError")
-      toast("Não foi possível iniciar o compartilhamento.");
+    const screenTrack =
+      stream.getVideoTracks()[0];
+
+    if (screenTrack) {
+      screenTrack.onended =
+        stopShare;
+    }
+
+    sendServerSharing(true);
+
+    toast(
+      "🖥️ Sua tela está sendo compartilhada."
+    );
+
+  } catch (error) {
+
+    console.error(
+      "Compartilhamento:",
+      error
+    );
+
+    if (
+      error.name !== "AbortError" &&
+      error.name !== "NotAllowedError"
+    ) {
+      toast(
+        "Não foi possível compartilhar a tela."
+      );
+    }
   }
 }
 
-function stopShare() {
-  if (!localScreen) return;
-  localScreen.getTracks().forEach(t => t.stop());
-  localScreen = null;
+function attachLocalPreview(stream) {
+
+  let card =
+    document.querySelector(
+      '[data-peer="local"]'
+    );
+
+  if (!card) {
+
+    card =
+      document.createElement("div");
+
+    card.className =
+      "video-card local-video";
+
+    card.dataset.peer =
+      "local";
+
+    card.innerHTML = `
+      <video
+        autoplay
+        muted
+        playsinline
+      ></video>
+
+      <div class="video-name">
+        Você · transmitindo
+      </div>
+    `;
+
+    $("#videos")?.appendChild(card);
+  }
+
+  const video =
+    card.querySelector("video");
+
+  video.srcObject =
+    stream;
+
+  video.muted = true;
+
+  video.play().catch(() => {});
+}
+
+function removeLocalPreview() {
+  document
+    .querySelector(
+      '[data-peer="local"]'
+    )
+    ?.remove();
+}
+
+async function stopShare() {
+
+  if (!localScreenStream) {
+    return;
+  }
+
+  const stream =
+    localScreenStream;
+
+  localScreenStream =
+    null;
+
   sharing = false;
-  $("#shareBtn").classList.remove("hidden");
-  $("#stopShareBtn").classList.add("hidden");
-  socket?.send(JSON.stringify({ type: "sharing", value: false }));
 
-  for (const state of peers.values()) {
-    for (const sender of state.pc.getSenders()) {
-      if (sender.track?.kind === "video") sender.replaceTrack(null).catch(()=>{});
-    }
-  }
-
-  toast("Transmissão encerrada.");
-}
-
-async function toggleMic() {
-  if (!micOn) {
+  for (
+    const track of stream.getTracks()
+  ) {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const track = stream.getAudioTracks()[0];
-      track.enabled = true;
-      micOn = true;
-      $("#micBtn").innerHTML = "<span>🎙️</span> Microfone ligado";
-      for (const [peerId, state] of peers) {
-        const old = state.pc.getSenders().find(s => s.track?.kind === "audio");
-        if (old) await old.replaceTrack(track);
-        else {
-          state.pc.addTrack(track, stream);
-          const offer = await state.pc.createOffer();
-          await state.pc.setLocalDescription(offer);
-          sendSignal(peerId, { sdp: state.pc.localDescription });
-        }
-      }
-    } catch {
-      toast("Não foi possível acessar o microfone.");
-    }
-  } else {
-    micOn = false;
-    $("#micBtn").innerHTML = "<span>🎙️</span> Microfone";
-    for (const state of peers.values()) {
-      const sender = state.pc.getSenders().find(s => s.track?.kind === "audio");
-      if (sender) sender.replaceTrack(null).catch(()=>{});
+      track.stop();
+    } catch {}
+  }
+
+  removeLocalPreview();
+
+  /*
+   * Remove a tela das conexões.
+   */
+  for (
+    const state of peers.values()
+  ) {
+
+    const videoSender =
+      state.pc
+        .getSenders()
+        .find(
+          sender =>
+            sender.track?.kind === "video"
+        );
+
+    if (videoSender) {
+
+      try {
+        await videoSender.replaceTrack(
+          null
+        );
+      } catch {}
     }
   }
-}
 
-function participantHTML(p) {
-  const initial = (p.name || "?").slice(0,1).toUpperCase();
-  return `<div class="participant" data-participant="${p.peerId}">
-    <div class="avatar">${initial}</div>
-    <div class="pname">${escapeHtml(p.name)}${p.peerId === myId ? " (você)" : ""}</div>
-    ${p.sharing ? '<div class="sharing-dot" title="Transmitindo"></div>' : ""}
-  </div>`;
-}
+  updateShareButtons();
 
-function renderParticipants(list) {
-  $("#participants").innerHTML = list.map(participantHTML).join("");
-  $("#count").textContent = list.length;
-}
+  sendServerSharing(false);
 
-function addParticipant(p) {
-  const exists = document.querySelector(`[data-participant="${p.peerId}"]`);
-  if (!exists) $("#participants").insertAdjacentHTML("beforeend", participantHTML(p));
-  renderParticipantsFromDOM();
-}
+  showEmpty();
 
-function updateParticipant(p) {
-  const old = document.querySelector(`[data-participant="${p.peerId}"]`);
-  if (old) old.outerHTML = participantHTML(p);
-  else addParticipant(p);
-  renderParticipantsFromDOM();
-}
-
-function renderParticipantsFromDOM() {
-  $("#count").textContent = document.querySelectorAll(".participant").length;
-}
-
-function addChat(from, text, mine) {
-  const el = document.createElement("div");
-  el.className = "message";
-  el.innerHTML = `<div class="meta">${mine ? "Você" : escapeHtml(from)}</div><div class="text">${escapeHtml(text)}</div>`;
-  $("#chatMessages").appendChild(el);
-  $("#chatMessages").scrollTop = $("#chatMessages").scrollHeight;
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;" }[c]));
-}
-
-function copyInvite() {
-  const url = `${location.origin}${location.pathname}?room=${encodeURIComponent(roomId)}`;
-  navigator.clipboard?.writeText(url).then(
-    () => toast("Link da sala copiado!"),
-    () => toast(url)
+  toast(
+    "⏹️ Transmissão encerrada."
   );
 }
 
-function enterRoom() {
-  myName = ($("#nameHome").value || "Convidado").trim().slice(0,30) || "Convidado";
-  roomId = normalizeRoom(roomId || $("#roomInput").value);
-  if (!roomId) roomId = randomRoom();
+function sendServerSharing(value) {
 
-  history.replaceState({}, "", `?room=${encodeURIComponent(roomId)}`);
-  $("#home").classList.add("hidden");
-  $("#room").classList.remove("hidden");
+  if (
+    socket &&
+    socket.readyState === WebSocket.OPEN
+  ) {
+    socket.send(
+      JSON.stringify({
+        type: "sharing",
+        value
+      })
+    );
+  }
+}
+
+function updateShareButtons() {
+
+  $("#shareBtn")
+    ?.classList.toggle(
+      "hidden",
+      sharing
+    );
+
+  $("#shareCenterBtn")
+    ?.classList.toggle(
+      "hidden",
+      sharing
+    );
+
+  $("#stopShareBtn")
+    ?.classList.toggle(
+      "hidden",
+      !sharing
+    );
+}
+
+/* =========================
+   MICROFONE
+========================= */
+
+async function toggleMic() {
+
+  if (mutedAll) {
+    toast(
+      "🔇 O administrador bloqueou os microfones."
+    );
+
+    return;
+  }
+
+  if (!micOn) {
+    await startMic();
+  } else {
+    stopMic();
+  }
+}
+
+async function startMic() {
+
+  try {
+
+    if (!localMicStream) {
+
+      localMicStream =
+        await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
+        });
+    }
+
+    const track =
+      localMicStream.getAudioTracks()[0];
+
+    if (!track) {
+      throw new Error(
+        "Microfone não encontrado."
+      );
+    }
+
+    track.enabled = true;
+
+    micOn = true;
+
+    for (
+      const [
+        peerId,
+        state
+      ] of peers
+    ) {
+
+      const audioSender =
+        state.pc
+          .getSenders()
+          .find(
+            sender =>
+              sender.track?.kind === "audio"
+          );
+
+      if (audioSender) {
+
+        await audioSender.replaceTrack(
+          track
+        );
+
+      } else {
+
+        state.pc.addTrack(
+          track,
+          localMicStream
+        );
+
+        const offer =
+          await state.pc.createOffer();
+
+        await state.pc.setLocalDescription(
+          offer
+        );
+
+        sendSignal(
+          peerId,
+          {
+            sdp: state.pc.localDescription
+          }
+        );
+      }
+    }
+
+    updateMicButton();
+
+    sendMicState(true);
+
+    toast(
+      "🎙️ Microfone ligado."
+    );
+
+  } catch (error) {
+
+    console.error(
+      "Microfone:",
+      error
+    );
+
+    toast(
+      "Não foi possível acessar o microfone."
+    );
+  }
+}
+
+function stopMic() {
+
+  micOn = false;
+
+  if (localMicStream) {
+
+    for (
+      const track of
+      localMicStream.getAudioTracks()
+    ) {
+      track.enabled = false;
+    }
+  }
+
+  for (
+    const state of peers.values()
+  ) {
+
+    const sender =
+      state.pc
+        .getSenders()
+        .find(
+          sender =>
+            sender.track?.kind === "audio"
+        );
+
+    /*
+     * Não remove necessariamente o áudio,
+     * apenas desliga o track local.
+     */
+    if (sender?.track) {
+      sender.track.enabled = false;
+    }
+  }
+
+  updateMicButton();
+
+  sendMicState(false);
+
+  toast(
+    "🎙️ Microfone desligado."
+  );
+}
+
+function forceMuteLocal() {
+
+  micOn = false;
+
+  if (localMicStream) {
+
+    for (
+      const track of
+      localMicStream.getAudioTracks()
+    ) {
+      track.enabled = false;
+    }
+  }
+
+  updateMicButton();
+}
+
+function sendMicState(value) {
+
+  if (
+    socket &&
+    socket.readyState === WebSocket.OPEN
+  ) {
+    socket.send(
+      JSON.stringify({
+        type: "mic",
+        value
+      })
+    );
+  }
+}
+
+function updateMicButton() {
+
+  const button =
+    $("#micBtn");
+
+  if (!button) {
+    return;
+  }
+
+  button.innerHTML =
+    micOn
+      ? "<span>🎙️</span> Microfone ligado"
+      : "<span>🔇</span> Microfone";
+}
+
+/* =========================
+   PARTICIPANTES
+========================= */
+
+function participantHTML(participant) {
+
+  const initial =
+    (
+      participant.name ||
+      "?"
+    )
+      .slice(0, 1)
+      .toUpperCase();
+
+  const host =
+    participant.host
+      ? `<span class="host-badge">👑</span>`
+      : "";
+
+  const sharing =
+    participant.sharing
+      ? `<span class="sharing-dot" title="Transmitindo"></span>`
+      : "";
+
+  const mic =
+    participant.micOn
+      ? "🎙️"
+      : "🔇";
+
+  return `
+    <div
+      class="participant"
+      data-participant="${participant.peerId}"
+    >
+
+      <div class="avatar">
+        ${escapeHtml(initial)}
+      </div>
+
+      <div class="pname">
+        ${escapeHtml(participant.name)}
+        ${
+          participant.peerId === myId
+            ? " (você)"
+            : ""
+        }
+      </div>
+
+      ${host}
+
+      ${sharing}
+
+      <span class="participant-mic">
+        ${mic}
+      </span>
+
+      ${
+        isHost &&
+        participant.peerId !== myId
+          ? `
+            <button
+              class="mute-person"
+              data-peer="${participant.peerId}"
+              title="Mutar participante"
+            >
+              🔇
+            </button>
+          `
+          : ""
+      }
+
+    </div>
+  `;
+}
+
+function renderParticipants(list) {
+
+  const container =
+    $("#participants");
+
+  if (!container) {
+    return;
+  }
+
+  container.innerHTML =
+    list
+      .map(participantHTML)
+      .join("");
+
+  $("#count").textContent =
+    list.length;
+
+  bindParticipantButtons();
+}
+
+function bindParticipantButtons() {
+
+  document
+    .querySelectorAll(
+      ".mute-person"
+    )
+    .forEach(button => {
+
+      button.onclick = () => {
+
+        const peerId =
+          button.dataset.peer;
+
+        if (
+          socket?.readyState ===
+          WebSocket.OPEN
+        ) {
+          socket.send(
+            JSON.stringify({
+              type: "mute-peer",
+              peerId
+            })
+          );
+        }
+      };
+    });
+}
+
+function addParticipant(participant) {
+
+  const container =
+    $("#participants");
+
+  if (!container) {
+    return;
+  }
+
+  const exists =
+    document.querySelector(
+      `[data-participant="${participant.peerId}"]`
+    );
+
+  if (!exists) {
+
+    container.insertAdjacentHTML(
+      "beforeend",
+      participantHTML(participant)
+    );
+  }
+
+  renderParticipantsFromDOM();
+
+  bindParticipantButtons();
+}
+
+function updateParticipant(participant) {
+
+  const old =
+    document.querySelector(
+      `[data-participant="${participant.peerId}"]`
+    );
+
+  if (old) {
+
+    old.outerHTML =
+      participantHTML(participant);
+
+  } else {
+
+    addParticipant(
+      participant
+    );
+  }
+
+  renderParticipantsFromDOM();
+
+  bindParticipantButtons();
+}
+
+function renderParticipantsFromDOM() {
+
+  const count =
+    document.querySelectorAll(
+      ".participant"
+    ).length;
+
+  if ($("#count")) {
+    $("#count").textContent =
+      count;
+  }
+}
+
+/* =========================
+   ADMINISTRADOR
+========================= */
+
+function updateHostControls() {
+
+  const button =
+    $("#muteAllBtn");
+
+  if (button) {
+    button.classList.toggle(
+      "hidden",
+      !isHost
+    );
+  }
+
+  bindParticipantButtons();
+}
+
+function toggleMuteAll() {
+
+  if (!isHost) {
+    toast(
+      "Somente o administrador pode usar essa função."
+    );
+
+    return;
+  }
+
+  mutedAll =
+    !mutedAll;
+
+  if (
+    socket?.readyState ===
+    WebSocket.OPEN
+  ) {
+
+    socket.send(
+      JSON.stringify({
+        type: "mute-all",
+        value: mutedAll
+      })
+    );
+  }
+
+  updateMuteAllButton();
+}
+
+function updateMuteAllButton() {
+
+  const button =
+    $("#muteAllBtn");
+
+  if (!button) {
+    return;
+  }
+
+  button.textContent =
+    mutedAll
+      ? "🔊 Liberar microfones"
+      : "🔇 Mutar todos";
+}
+
+/* =========================
+   CHAT
+========================= */
+
+function addChat(
+  from,
+  text,
+  mine
+) {
+
+  const container =
+    $("#chatMessages");
+
+  if (!container) {
+    return;
+  }
+
+  const message =
+    document.createElement("div");
+
+  message.className =
+    "message";
+
+  message.innerHTML = `
+    <div class="meta">
+      ${
+        mine
+          ? "Você"
+          : escapeHtml(from)
+      }
+    </div>
+
+    <div class="text">
+      ${escapeHtml(text)}
+    </div>
+  `;
+
+  container.appendChild(
+    message
+  );
+
+  container.scrollTop =
+    container.scrollHeight;
+}
+
+/* =========================
+   CONVITE
+========================= */
+
+async function copyInvite() {
+
+  const url =
+    `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(roomId)}`;
+
+  try {
+
+    await navigator.clipboard.writeText(
+      url
+    );
+
+    toast(
+      "🔗 Link da sala copiado!"
+    );
+
+  } catch {
+
+    prompt(
+      "Copie o link da sala:",
+      url
+    );
+  }
+}
+
+/* =========================
+   ENTRAR
+========================= */
+
+function enterRoom() {
+
+  myName =
+    (
+      $("#nameHome")?.value ||
+      "Convidado"
+    )
+      .trim()
+      .slice(0, 30);
+
+  if (!myName) {
+    myName =
+      "Convidado";
+  }
+
+  roomId =
+    normalizeRoom(
+      roomId ||
+      $("#roomInput")?.value
+    );
+
+  if (!roomId) {
+    roomId =
+      randomRoom();
+  }
+
+  const passwordInput =
+    $("#roomPassword");
+
+  window.__roomPassword =
+    passwordInput?.value || "";
+
+  history.replaceState(
+    {},
+    "",
+    `?room=${encodeURIComponent(roomId)}`
+  );
+
+  showRoom();
+
   connect();
 }
 
-$("#createBtn").onclick = () => { roomId = randomRoom(); enterRoom(); };
-$("#joinBtn").onclick = () => { roomId = normalizeRoom($("#roomInput").value); if (!roomId) return toast("Digite o código da sala."); enterRoom(); };
-$("#shareBtn").onclick = startShare;
-$("#shareCenterBtn").onclick = startShare;
-$("#stopShareBtn").onclick = stopShare;
-$("#micBtn").onclick = toggleMic;
-$("#copyBtn").onclick = copyInvite;
-$("#inviteBtn").onclick = copyInvite;
-$("#leaveBtn").onclick = () => { try { socket?.close(); } catch {} location.href = location.pathname; };
+/* =========================
+   EVENTOS
+========================= */
 
-$("#chatForm").onsubmit = e => {
-  e.preventDefault();
-  const input = $("#chatInput");
-  const text = input.value.trim();
-  if (!text || socket?.readyState !== 1) return;
-  socket.send(JSON.stringify({ type: "chat", text }));
-  input.value = "";
-};
+$("#createBtn")?.addEventListener(
+  "click",
+  () => {
 
-$("#roomInput").addEventListener("keydown", e => {
-  if (e.key === "Enter") $("#joinBtn").click();
-});
+    roomId =
+      randomRoom();
+
+    enterRoom();
+  }
+);
+
+$("#joinBtn")?.addEventListener(
+  "click",
+  () => {
+
+    roomId =
+      normalizeRoom(
+        $("#roomInput")?.value
+      );
+
+    if (!roomId) {
+
+      toast(
+        "Digite o código da sala."
+      );
+
+      return;
+    }
+
+    enterRoom();
+  }
+);
+
+$("#shareBtn")?.addEventListener(
+  "click",
+  startShare
+);
+
+$("#shareCenterBtn")?.addEventListener(
+  "click",
+  startShare
+);
+
+$("#stopShareBtn")?.addEventListener(
+  "click",
+  stopShare
+);
+
+$("#micBtn")?.addEventListener(
+  "click",
+  toggleMic
+);
+
+$("#muteAllBtn")?.addEventListener(
+  "click",
+  toggleMuteAll
+);
+
+$("#copyBtn")?.addEventListener(
+  "click",
+  copyInvite
+);
+
+$("#inviteBtn")?.addEventListener(
+  "click",
+  copyInvite
+);
+
+$("#leaveBtn")?.addEventListener(
+  "click",
+  () => {
+
+    try {
+      stopShare();
+    } catch {}
+
+    try {
+      if (localMicStream) {
+        localMicStream
+          .getTracks()
+          .forEach(
+            track =>
+              track.stop()
+          );
+      }
+    } catch {}
+
+    try {
+      socket?.close();
+    } catch {}
+
+    window.location.href =
+      window.location.pathname;
+  }
+);
+
+$("#chatForm")?.addEventListener(
+  "submit",
+  (event) => {
+
+    event.preventDefault();
+
+    const input =
+      $("#chatInput");
+
+    const text =
+      input?.value.trim();
+
+    if (
+      !text ||
+      socket?.readyState !==
+      WebSocket.OPEN
+    ) {
+      return;
+    }
+
+    socket.send(
+      JSON.stringify({
+        type: "chat",
+        text
+      })
+    );
+
+    input.value = "";
+  }
+);
+
+$("#roomInput")?.addEventListener(
+  "keydown",
+  (event) => {
+
+    if (event.key === "Enter") {
+      $("#joinBtn")?.click();
+    }
+  }
+);
+
+/* =========================
+   LINK DIRETO
+========================= */
 
 if (roomId) {
-  // Se o link já vier com uma sala, pede apenas o nome.
-  $("#home").classList.remove("hidden");
-  $("#roomInput").value = roomId;
+
+  $("#roomInput").value =
+    roomId;
+
+  /*
+   * O usuário ainda informa o nome.
+   * Depois pode entrar normalmente.
+   */
+  showHome();
 }
