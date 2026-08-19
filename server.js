@@ -990,15 +990,6 @@ setInterval(
    SERVIDOR
 ========================================================= */
 
-server.listen(
-  PORT,
-  "0.0.0.0",
-  () => {
-
-    console.log(
-      `Hype Roleplay rodando na porta ${PORT}`
-    );
-
-  }
-);
-```
+server.listen(PORT, "0.0.0.0", () => {
+  console.log("Hype Roleplay rodando na porta " + PORT);
+});
