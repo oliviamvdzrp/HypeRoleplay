@@ -1,11 +1,8 @@
-const socket = new WebSocket('ws://SEU_SERVIDOR');
+const volumeControl = document.getElementById('volumeControl');
 
-socket.onmessage = function(event) {
-    const data = JSON.parse(event.data);
-    // Atualize a interface conforme necessário
-};
+// Supondo que você tenha um elemento de áudio remoto
+const remoteAudio = document.getElementById('remoteAudioElement'); // ajuste conforme necessário
 
-// Função para notificar a entrada e saída de usuários
-function notify(action, nome) {
-    socket.send(JSON.stringify({ action, nome }));
-}
+volumeControl.addEventListener('input', function() {
+    remoteAudio.volume = this.value; // Ajuste o volume
+});
