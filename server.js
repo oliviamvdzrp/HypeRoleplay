@@ -17,14 +17,15 @@ app.get("/health", (_req, res) => {
     ok: true,
     service: "Hype Roleplay",
     time: new Date().toISOString()
-  });
-});
 
-app.use((req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
 });
+app.use((req, res) => {
+  res.sendFile(
+    path.join(__dirname, "public", "index.html")
   );
 });
+
+
 
 /* =========================================================
    SALAS
