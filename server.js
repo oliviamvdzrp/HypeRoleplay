@@ -1,4 +1,4 @@
-```javascript
+
 const path = require("path");
 const http = require("http");
 const express = require("express");
@@ -621,4 +621,4 @@ server.listen(PORT, "0.0.0.0", () => {
     "Hype Roleplay rodando na porta " + PORT
   );
 });
-```
+
