@@ -9,9 +9,7 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
 const PORT = process.env.PORT || 10000;
-const MAX_PARTICIPANTS = 12;
 
-app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/health", (_req, res) => {
@@ -22,123 +20,62 @@ app.get("/health", (_req, res) => {
   });
 });
 
+// Compatível com Express 5
+app.use((_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
 const rooms = new Map();
 
-function cleanId(value) {
-  return String(value || "")
-    .replace(/[^a-zA-Z0-9_-]/g, "")
-    .slice(0, 32);
+function send(ws, message) {
+  if (ws.readyState === 1) {
+    ws.send(JSON.stringify(message));
+  }
 }
 
-function createRoomId() {
-  let id;
-
-  do {
-    id = crypto.randomBytes(4).toString("hex").toUpperCase();
-  } while (rooms.has(id));
-
-  return id;
+function broadcast(room, message, except = null) {
+  for (const client of room.clients) {
+    if (client !== except) {
+      send(client.ws, message);
+    }
+  }
 }
 
-function createRoom(password = "") {
-  const room = {
-    id: createRoomId(),
-    password: String(password || "").slice(0, 50),
-    clients: new Set(),
-    hostId: null,
-    mutedAll: false
-  };
+function getRoom(id) {
+  let room = rooms.get(id);
 
-  rooms.set(room.id, room);
+  if (!room) {
+    room = {
+      clients: new Set(),
+      password: null,
+      host: null,
+      mutedAll: false
+    };
+
+    rooms.set(id, room);
+  }
 
   return room;
 }
 
-function send(ws, data) {
-  if (ws && ws.readyState === 1) {
-    try {
-      ws.send(JSON.stringify(data));
-    } catch {}
-  }
-}
-
-function broadcast(room, data, except = null) {
-  for (const client of room.clients) {
-    if (client !== except) {
-      send(client.ws, data);
-    }
-  }
-}
-
-function participantData(client) {
-  return {
-    peerId: client.peerId,
-    name: client.name,
-    sharing: !!client.sharing,
-    micOn: !!client.micOn,
-    host: client.peerId === client.room.hostId
-  };
-}
-
-function participantsList(room) {
-  return [...room.clients].map(participantData);
-}
-
-function sendParticipants(room) {
-  broadcast(room, {
-    type: "participants",
-    participants: participantsList(room),
-    mutedAll: room.mutedAll
-  });
-}
-
-function removeClient(ws) {
-  const room = ws.room;
-
-  if (!room) return;
-
-  const client = [...room.clients].find(
-    item => item.ws === ws
-  );
-
-  if (!client) return;
-
-  room.clients.delete(client);
-
-  broadcast(room, {
-    type: "participant-left",
-    peerId: client.peerId
-  });
-
-  // Se o administrador sair, passa a administração para outra pessoa.
-  if (room.hostId === client.peerId) {
-    const next = room.clients.values().next().value;
-
-    room.hostId = next ? next.peerId : null;
-
-    if (next) {
-      send(next.ws, {
-        type: "host-changed",
-        host: true
-      });
-    }
-  }
-
-  sendParticipants(room);
-
+function cleanRoom(room) {
   if (room.clients.size === 0) {
-    rooms.delete(room.id);
+    for (const [id, currentRoom] of rooms) {
+      if (currentRoom === room) {
+        rooms.delete(id);
+      }
+    }
   }
 }
 
-wss.on("connection", ws => {
+wss.on("connection", (ws) => {
   ws.isAlive = true;
 
   ws.on("pong", () => {
     ws.isAlive = true;
   });
 
-  ws.on("message", raw => {
+  ws.on("message", (raw) => {
     let msg;
 
     try {
@@ -147,26 +84,12 @@ wss.on("connection", ws => {
       return;
     }
 
-    /*
-     * CRIAR SALA
-     */
-    if (msg.type === "create-room") {
-      const room = createRoom(msg.password);
-
-      send(ws, {
-        type: "room-created",
-        room: room.id,
-        hasPassword: !!room.password
-      });
-
-      return;
-    }
-
-    /*
-     * ENTRAR NA SALA
-     */
+    // ENTRAR NA SALA
     if (msg.type === "join") {
-      const id = cleanId(msg.room);
+      const id = String(msg.room || "")
+        .replace(/[^a-zA-Z0-9_-]/g, "")
+        .slice(0, 32);
+
       const name =
         String(msg.name || "Convidado")
           .trim()
@@ -175,235 +98,137 @@ wss.on("connection", ws => {
       const password = String(msg.password || "");
 
       if (!id) {
-        send(ws, {
+        return send(ws, {
           type: "error",
           message: "Sala inválida."
         });
-
-        return;
       }
 
-      const room = rooms.get(id);
+      const room = getRoom(id);
 
-      if (!room) {
-        send(ws, {
-          type: "error",
-          message: "Essa sala não existe ou já foi encerrada."
-        });
-
-        return;
-      }
-
-      /*
-       * SENHA
-       */
+      // Sala com senha
       if (room.password && room.password !== password) {
-        send(ws, {
+        return send(ws, {
           type: "password-required",
           message: "Essa sala possui uma senha."
         });
-
-        return;
       }
 
-      /*
-       * LIMITE
-       */
-      if (room.clients.size >= MAX_PARTICIPANTS) {
-        send(ws, {
+      // Limite
+      if (room.clients.size >= 12) {
+        return send(ws, {
           type: "error",
-          message:
-            `Esta sala atingiu o limite de ${MAX_PARTICIPANTS} participantes.`
+          message: "Esta sala atingiu o limite de 12 participantes."
         });
-
-        return;
       }
 
       const peerId = crypto.randomUUID();
 
-      const client = {
+      ws.roomId = id;
+      ws.peerId = peerId;
+      ws.name = name;
+
+      const participant = {
         ws,
         peerId,
         name,
-        room,
         sharing: false,
-        micOn: false
+        muted: false
       };
 
-      ws.room = room;
-      ws.peerId = peerId;
-
-      room.clients.add(client);
-
-      /*
-       * PRIMEIRO PARTICIPANTE = ADMIN
-       */
-      if (!room.hostId) {
-        room.hostId = peerId;
+      // Primeiro participante vira administrador
+      if (!room.host) {
+        room.host = peerId;
       }
 
-      /*
-       * INFORMAÇÕES PARA QUEM ENTROU
-       */
+      room.clients.add(participant);
+
       send(ws, {
         type: "joined",
         peerId,
-        room: room.id,
-        host: room.hostId === peerId,
+        room: id,
+        host: room.host,
         mutedAll: room.mutedAll,
-        participants: participantsList(room)
+
+        participants: [...room.clients].map((p) => ({
+          peerId: p.peerId,
+          name: p.name,
+          sharing: p.sharing,
+          muted: p.muted
+        }))
       });
 
-      /*
-       * AVISA OS OUTROS
-       */
       broadcast(
         room,
         {
           type: "participant-joined",
-          participant: participantData(client)
+          participant: {
+            peerId,
+            name,
+            sharing: false,
+            muted: false
+          }
         },
-        client
+        participant
       );
 
-      sendParticipants(room);
-
       return;
     }
 
-    /*
-     * A PARTIR DAQUI PRECISA ESTAR DENTRO DE UMA SALA
-     */
+    const room = ws.roomId
+      ? rooms.get(ws.roomId)
+      : null;
 
-    const room = ws.room;
-
-    if (!room) {
-      return;
-    }
+    if (!room) return;
 
     const me = [...room.clients].find(
-      client => client.ws === ws
+      (p) => p.ws === ws
     );
 
-    if (!me) {
-      return;
-    }
+    if (!me) return;
 
-    /*
-     * WEBRTC SIGNALING
-     */
+    // WEBRTC
     if (msg.type === "signal") {
       const target = [...room.clients].find(
-        client => client.peerId === msg.to
+        (p) => p.peerId === msg.to
       );
 
-      if (!target) {
-        return;
+      if (target) {
+        send(target.ws, {
+          type: "signal",
+          from: me.peerId,
+          fromName: me.name,
+          signal: msg.signal
+        });
       }
-
-      send(target.ws, {
-        type: "signal",
-        from: me.peerId,
-        fromName: me.name,
-        signal: msg.signal
-      });
 
       return;
     }
 
-    /*
-     * COMPARTILHAMENTO
-     */
+    // COMPARTILHAMENTO
     if (msg.type === "sharing") {
       me.sharing = !!msg.value;
 
-      sendParticipants(room);
-
-      return;
-    }
-
-    /*
-     * MICROFONE
-     */
-    if (msg.type === "mic") {
-      me.micOn = !!msg.value;
-
-      sendParticipants(room);
-
-      return;
-    }
-
-    /*
-     * MUTAR TODOS
-     */
-    if (msg.type === "mute-all") {
-      if (me.peerId !== room.hostId) {
-        send(ws, {
-          type: "error",
-          message:
-            "Somente o administrador pode mutar todos."
-        });
-
-        return;
-      }
-
-      room.mutedAll = !!msg.value;
-
       broadcast(room, {
-        type: "mute-all",
-        value: room.mutedAll
+        type: "participant-updated",
+        participant: {
+          peerId: me.peerId,
+          name: me.name,
+          sharing: me.sharing,
+          muted: me.muted
+        }
       });
-
-      sendParticipants(room);
 
       return;
     }
 
-    /*
-     * MUTAR UMA PESSOA
-     */
-    if (msg.type === "mute-peer") {
-      if (me.peerId !== room.hostId) {
-        send(ws, {
-          type: "error",
-          message:
-            "Somente o administrador pode mutar participantes."
-        });
-
-        return;
-      }
-
-      const target = [...room.clients].find(
-        client => client.peerId === msg.peerId
-      );
-
-      if (!target) {
-        return;
-      }
-
-      target.micOn = false;
-
-      send(target.ws, {
-        type: "force-mute"
-      });
-
-      sendParticipants(room);
-
-      return;
-    }
-
-    /*
-     * CHAT
-     */
+    // CHAT
     if (msg.type === "chat") {
-      const text =
-        String(msg.text || "")
-          .trim()
-          .slice(0, 500);
+      const text = String(msg.text || "")
+        .trim()
+        .slice(0, 500);
 
-      if (!text) {
-        return;
-      }
+      if (!text) return;
 
       broadcast(room, {
         type: "chat",
@@ -415,22 +240,98 @@ wss.on("connection", ws => {
 
       return;
     }
+
+    // MUTAR TODOS
+    if (msg.type === "mute-all") {
+
+      // Somente o administrador pode mutar todos
+      if (room.host !== me.peerId) {
+        return send(ws, {
+          type: "error",
+          message: "Somente o administrador pode mutar todos."
+        });
+      }
+
+      room.mutedAll = !!msg.value;
+
+      for (const participant of room.clients) {
+        if (participant.peerId !== me.peerId) {
+          participant.muted = room.mutedAll;
+        }
+      }
+
+      broadcast(room, {
+        type: "mute-all",
+        value: room.mutedAll
+      });
+
+      return;
+    }
+
+    // ALTERAR MICROFONE INDIVIDUAL
+    if (msg.type === "mute") {
+
+      me.muted = !!msg.value;
+
+      broadcast(room, {
+        type: "participant-updated",
+        participant: {
+          peerId: me.peerId,
+          name: me.name,
+          sharing: me.sharing,
+          muted: me.muted
+        }
+      });
+
+      return;
+    }
   });
 
+  // USUÁRIO SAIU
   ws.on("close", () => {
-    removeClient(ws);
-  });
+    const room = ws.roomId
+      ? rooms.get(ws.roomId)
+      : null;
 
-  ws.on("error", () => {
-    removeClient(ws);
+    if (!room) return;
+
+    const me = [...room.clients].find(
+      (p) => p.ws === ws
+    );
+
+    if (me) {
+      room.clients.delete(me);
+
+      broadcast(room, {
+        type: "participant-left",
+        peerId: me.peerId
+      });
+
+      // Se o administrador sair, passa para outro
+      if (room.host === me.peerId) {
+        const next = room.clients.values().next().value;
+
+        room.host = next
+          ? next.peerId
+          : null;
+
+        if (next) {
+          broadcast(room, {
+            type: "host-changed",
+            peerId: room.host
+          });
+        }
+      }
+    }
+
+    cleanRoom(room);
   });
 });
 
-/*
- * MANTÉM WEBSOCKETS VIVOS NO RENDER
- */
+// Keep Alive
 setInterval(() => {
   for (const ws of wss.clients) {
+
     if (!ws.isAlive) {
       try {
         ws.terminate();
@@ -446,25 +347,6 @@ setInterval(() => {
     } catch {}
   }
 }, 30000);
-
-/*
- * FALLBACK DO SITE
- *
- * IMPORTANTE:
- * NÃO usamos app.get("*"),
- * pois Express 5 apresenta erro com essa rota.
- */
-app.use((req, res) => {
-  if (req.method === "GET") {
-    res.sendFile(
-      path.join(__dirname, "public", "index.html")
-    );
-  } else {
-    res.status(404).json({
-      error: "Not found"
-    });
-  }
-});
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log(
