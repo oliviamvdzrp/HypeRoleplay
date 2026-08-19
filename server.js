@@ -9,6 +9,7 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
 const PORT = process.env.PORT || 10000;
+const MAX_PARTICIPANTS = 12;
 
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -20,23 +21,38 @@ app.get("/health", (_req, res) => {
   });
 });
 
-// Compatível com Express 5
-app.use((_req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
+/*
+ * Express 5 não aceita mais app.get("*").
+ * Esta forma evita o erro path-to-regexp.
+ */
+app.use((req, res, next) => {
+  if (req.method === "GET" && !req.path.startsWith("/health")) {
+    res.sendFile(path.join(__dirname, "public", "index.html"));
+  } else {
+    next();
+  }
 });
 
 const rooms = new Map();
 
-function send(ws, message) {
+function createRoomId() {
+  return crypto.randomBytes(4).toString("hex").toUpperCase();
+}
+
+function createPassword() {
+  return crypto.randomBytes(12).toString("hex");
+}
+
+function send(ws, data) {
   if (ws && ws.readyState === 1) {
-    ws.send(JSON.stringify(message));
+    ws.send(JSON.stringify(data));
   }
 }
 
-function broadcast(room, message, except = null) {
-  for (const client of room.clients) {
-    if (client !== except) {
-      send(client.ws, message);
+function broadcast(room, data, except = null) {
+  for (const participant of room.clients) {
+    if (participant !== except) {
+      send(participant.ws, data);
     }
   }
 }
@@ -46,12 +62,11 @@ function getRoom(id) {
 
   if (!room) {
     room = {
-      clients: new Set(),
+      id,
       password: null,
-      host: null,
-      mutedAll: false,
-      allowSharing: true,
-      allowMic: true
+      clients: new Set(),
+      adminId: null,
+      mutedAll: false
     };
 
     rooms.set(id, room);
@@ -60,37 +75,40 @@ function getRoom(id) {
   return room;
 }
 
-function cleanRoom(room) {
-  if (room.clients.size === 0) {
-    for (const [id, currentRoom] of rooms) {
-      if (currentRoom === room) {
-        rooms.delete(id);
-      }
-    }
-  }
+function getParticipant(room, peerId) {
+  return [...room.clients].find(
+    participant => participant.peerId === peerId
+  );
 }
 
-function isHost(room, peerId) {
-  return room.host === peerId;
-}
-
-function participantInfo(p) {
+function publicParticipant(participant) {
   return {
-    peerId: p.peerId,
-    name: p.name,
-    sharing: p.sharing,
-    muted: p.muted
+    peerId: participant.peerId,
+    name: participant.name,
+    sharing: participant.sharing,
+    muted: participant.muted,
+    isAdmin: participant.isAdmin
   };
 }
 
-wss.on("connection", (ws) => {
+function cleanRoom(room) {
+  if (!room || room.clients.size === 0) {
+    rooms.delete(room.id);
+  }
+}
+
+/* =========================
+   WEBSOCKET
+========================= */
+
+wss.on("connection", ws => {
   ws.isAlive = true;
 
   ws.on("pong", () => {
     ws.isAlive = true;
   });
 
-  ws.on("message", (raw) => {
+  ws.on("message", raw => {
     let msg;
 
     try {
@@ -99,9 +117,10 @@ wss.on("connection", (ws) => {
       return;
     }
 
-    // =========================
-    // ENTRAR NA SALA
-    // =========================
+    /* =========================
+       ENTRAR NA SALA
+    ========================= */
+
     if (msg.type === "join") {
       const id = String(msg.room || "")
         .replace(/[^a-zA-Z0-9_-]/g, "")
@@ -112,8 +131,6 @@ wss.on("connection", (ws) => {
           .trim()
           .slice(0, 30) || "Convidado";
 
-      const password = String(msg.password || "");
-
       if (!id) {
         return send(ws, {
           type: "error",
@@ -123,58 +140,64 @@ wss.on("connection", (ws) => {
 
       const room = getRoom(id);
 
-      if (room.password && room.password !== password) {
+      if (room.clients.size >= MAX_PARTICIPANTS) {
         return send(ws, {
-          type: "password-required",
-          message: "Essa sala possui uma senha."
+          type: "error",
+          message: `A sala atingiu o limite de ${MAX_PARTICIPANTS} participantes.`
         });
       }
 
-      if (room.clients.size >= 12) {
-        return send(ws, {
-          type: "error",
-          message: "Esta sala atingiu o limite de 12 participantes."
-        });
+      /*
+       * A senha é conferida somente quando a sala já possui senha.
+       */
+      if (room.password) {
+        const password = String(msg.password || "");
+
+        if (password !== room.password) {
+          return send(ws, {
+            type: "password-required",
+            message: "Esta sala possui uma senha."
+          });
+        }
       }
 
       const peerId = crypto.randomUUID();
 
-      ws.roomId = id;
-      ws.peerId = peerId;
-      ws.name = name;
+      const isAdmin = room.clients.size === 0;
 
       const participant = {
         ws,
         peerId,
         name,
         sharing: false,
-        muted: false
+        muted: false,
+        isAdmin
       };
 
-      // Primeiro participante = ADM
-      if (!room.host) {
-        room.host = peerId;
-      }
+      ws.roomId = id;
+      ws.peerId = peerId;
+      ws.name = name;
 
       room.clients.add(participant);
+
+      if (isAdmin) {
+        room.adminId = peerId;
+      }
 
       send(ws, {
         type: "joined",
         peerId,
         room: id,
-        host: room.host,
+        isAdmin,
         mutedAll: room.mutedAll,
-        allowSharing: room.allowSharing,
-        allowMic: room.allowMic,
-
-        participants: [...room.clients].map(participantInfo)
+        participants: [...room.clients].map(publicParticipant)
       });
 
       broadcast(
         room,
         {
           type: "participant-joined",
-          participant: participantInfo(participant)
+          participant: publicParticipant(participant)
         },
         participant
       );
@@ -182,28 +205,30 @@ wss.on("connection", (ws) => {
       return;
     }
 
-    // =========================
-    // VERIFICAR SALA
-    // =========================
+    /* =========================
+       PEGAR SALA
+    ========================= */
+
     const room = ws.roomId
       ? rooms.get(ws.roomId)
       : null;
 
-    if (!room) return;
+    if (!room) {
+      return;
+    }
 
-    const me = [...room.clients].find(
-      (p) => p.ws === ws
-    );
+    const me = getParticipant(room, ws.peerId);
 
-    if (!me) return;
+    if (!me) {
+      return;
+    }
 
-    // =========================
-    // WEBRTC
-    // =========================
+    /* =========================
+       WEBRTC SIGNAL
+    ========================= */
+
     if (msg.type === "signal") {
-      const target = [...room.clients].find(
-        (p) => p.peerId === msg.to
-      );
+      const target = getParticipant(room, msg.to);
 
       if (target) {
         send(target.ws, {
@@ -217,37 +242,33 @@ wss.on("connection", (ws) => {
       return;
     }
 
-    // =========================
-    // COMPARTILHAMENTO
-    // =========================
+    /* =========================
+       COMPARTILHAMENTO
+    ========================= */
+
     if (msg.type === "sharing") {
-
-      if (!room.allowSharing && !isHost(room, me.peerId)) {
-        return send(ws, {
-          type: "sharing-blocked",
-          message: "O administrador bloqueou o compartilhamento de tela."
-        });
-      }
-
       me.sharing = !!msg.value;
 
       broadcast(room, {
         type: "participant-updated",
-        participant: participantInfo(me)
+        participant: publicParticipant(me)
       });
 
       return;
     }
 
-    // =========================
-    // CHAT
-    // =========================
+    /* =========================
+       CHAT
+    ========================= */
+
     if (msg.type === "chat") {
       const text = String(msg.text || "")
         .trim()
         .slice(0, 500);
 
-      if (!text) return;
+      if (!text) {
+        return;
+      }
 
       broadcast(room, {
         type: "chat",
@@ -260,144 +281,124 @@ wss.on("connection", (ws) => {
       return;
     }
 
-    // =========================
-    // MUTE TODOS
-    // =========================
-    if (msg.type === "mute-all") {
+    /* =========================
+       ADM: CRIAR / DEFINIR SENHA
+    ========================= */
 
-      if (!isHost(room, me.peerId)) {
+    if (msg.type === "set-password") {
+      if (room.adminId !== me.peerId) {
         return send(ws, {
           type: "error",
-          message: "Somente o administrador pode fazer isso."
+          message: "Somente o administrador pode alterar a senha."
         });
       }
 
-      room.mutedAll = !!msg.value;
+      const password = String(msg.password || "")
+        .trim()
+        .slice(0, 50);
 
-      for (const participant of room.clients) {
-        if (participant.peerId !== me.peerId) {
-          participant.muted = room.mutedAll;
-        }
-      }
+      room.password = password || null;
 
-      broadcast(room, {
-        type: "mute-all",
-        value: room.mutedAll
+      send(ws, {
+        type: "password-updated",
+        enabled: !!room.password
       });
 
       return;
     }
 
-    // =========================
-    // MUTE INDIVIDUAL
-    // =========================
-    if (msg.type === "mute-user") {
+    /* =========================
+       ADM: MUTAR UM USUÁRIO
+    ========================= */
 
-      if (!isHost(room, me.peerId)) {
+    if (msg.type === "mute-user") {
+      if (room.adminId !== me.peerId) {
         return send(ws, {
           type: "error",
           message: "Somente o administrador pode mutar participantes."
         });
       }
 
-      const target = [...room.clients].find(
-        (p) => p.peerId === msg.peerId
-      );
+      const target = getParticipant(room, msg.peerId);
 
-      if (!target) return;
+      if (!target) {
+        return;
+      }
 
-      target.muted = !!msg.value;
+      target.muted = !!msg.muted;
 
       send(target.ws, {
         type: "force-mute",
-        value: target.muted
+        muted: target.muted,
+        message: target.muted
+          ? "O administrador desativou seu microfone."
+          : "Seu microfone foi liberado."
       });
 
       broadcast(room, {
         type: "participant-updated",
-        participant: participantInfo(target)
+        participant: publicParticipant(target)
       });
 
       return;
     }
 
-    // =========================
-    // PERMITIR/BLOQUEAR MICROFONE
-    // =========================
-    if (msg.type === "mic-permission") {
+    /* =========================
+       ADM: MUTAR TODOS
+    ========================= */
 
-      if (!isHost(room, me.peerId)) {
+    if (msg.type === "mute-all") {
+      if (room.adminId !== me.peerId) {
         return send(ws, {
           type: "error",
-          message: "Somente o administrador pode alterar essa configuração."
+          message: "Somente o administrador pode mutar todos."
         });
       }
 
-      room.allowMic = !!msg.value;
+      room.mutedAll = !!msg.muted;
 
-      broadcast(room, {
-        type: "mic-permission",
-        value: room.allowMic
-      });
-
-      return;
-    }
-
-    // =========================
-    // PERMITIR/BLOQUEAR TRANSMISSÃO
-    // =========================
-    if (msg.type === "sharing-permission") {
-
-      if (!isHost(room, me.peerId)) {
-        return send(ws, {
-          type: "error",
-          message: "Somente o administrador pode alterar essa configuração."
-        });
-      }
-
-      room.allowSharing = !!msg.value;
-
-      if (!room.allowSharing) {
-        for (const participant of room.clients) {
-          if (participant.peerId !== me.peerId) {
-            participant.sharing = false;
-          }
+      for (const participant of room.clients) {
+        if (participant.peerId === me.peerId) {
+          continue;
         }
+
+        participant.muted = room.mutedAll;
+
+        send(participant.ws, {
+          type: "force-mute",
+          muted: room.mutedAll,
+          message: room.mutedAll
+            ? "O administrador mutou todos os microfones."
+            : "O administrador liberou os microfones."
+        });
       }
 
       broadcast(room, {
-        type: "sharing-permission",
-        value: room.allowSharing
+        type: "room-settings",
+        mutedAll: room.mutedAll
       });
 
       return;
     }
 
-    // =========================
-    // EXPULSAR USUÁRIO
-    // =========================
-    if (msg.type === "kick-user") {
+    /* =========================
+       ADM: EXPULSAR
+    ========================= */
 
-      // Apenas o ADM pode expulsar
-      if (!isHost(room, me.peerId)) {
+    if (msg.type === "kick") {
+      if (room.adminId !== me.peerId) {
         return send(ws, {
           type: "error",
           message: "Somente o administrador pode expulsar usuários."
         });
       }
 
-      const target = [...room.clients].find(
-        (p) => p.peerId === msg.peerId
-      );
+      const target = getParticipant(room, msg.peerId);
 
       if (!target) {
-        return send(ws, {
-          type: "error",
-          message: "Usuário não encontrado."
-        });
+        return;
       }
 
-      // Não pode expulsar a si mesmo
       if (target.peerId === me.peerId) {
         return send(ws, {
           type: "error",
@@ -405,93 +406,97 @@ wss.on("connection", (ws) => {
         });
       }
 
-      // Avisa o usuário antes de desconectar
       send(target.ws, {
         type: "kicked",
         message: "Você foi removido da sala pelo administrador."
       });
 
-      // Avisa os outros participantes
-      broadcast(room, {
-        type: "participant-kicked",
-        peerId: target.peerId,
-        name: target.name
-      }, target);
-
-      // Remove da sala
-      room.clients.delete(target);
-
-      try {
-        target.ws.close(4001, "Kicked by host");
-      } catch {}
+      setTimeout(() => {
+        try {
+          target.ws.close(4001, "Kicked");
+        } catch {}
+      }, 100);
 
       return;
     }
 
-    // =========================
-    // ALTERAR SENHA
-    // =========================
-    if (msg.type === "set-password") {
+    /* =========================
+       ADM: TRANSFERIR ADM
+    ========================= */
 
-      if (!isHost(room, me.peerId)) {
+    if (msg.type === "transfer-admin") {
+      if (room.adminId !== me.peerId) {
         return send(ws, {
           type: "error",
-          message: "Somente o administrador pode alterar a senha."
+          message: "Somente o administrador pode transferir a administração."
         });
       }
 
-      const password = String(msg.password || "").trim();
+      const target = getParticipant(room, msg.peerId);
 
-      room.password = password || null;
+      if (!target) {
+        return;
+      }
 
-      send(ws, {
-        type: "password-updated",
-        hasPassword: !!room.password
+      me.isAdmin = false;
+      target.isAdmin = true;
+      room.adminId = target.peerId;
+
+      broadcast(room, {
+        type: "participants-refresh",
+        participants: [...room.clients].map(publicParticipant)
       });
 
       return;
     }
   });
 
-  // =========================
-  // USUÁRIO SAIU
-  // =========================
-  ws.on("close", () => {
+  /* =========================
+     DESCONEXÃO
+  ========================= */
 
+  ws.on("close", () => {
     const room = ws.roomId
       ? rooms.get(ws.roomId)
       : null;
 
-    if (!room) return;
+    if (!room) {
+      return;
+    }
 
-    const me = [...room.clients].find(
-      (p) => p.ws === ws
-    );
+    const me = getParticipant(room, ws.peerId);
 
-    if (me) {
+    if (!me) {
+      return;
+    }
 
-      room.clients.delete(me);
+    room.clients.delete(me);
 
-      broadcast(room, {
-        type: "participant-left",
-        peerId: me.peerId
-      });
+    broadcast(room, {
+      type: "participant-left",
+      peerId: me.peerId
+    });
 
-      // Se o ADM saiu, passa para outro
-      if (room.host === me.peerId) {
+    /*
+     * Se o ADM sair, passa a administração para
+     * o próximo participante.
+     */
+    if (room.adminId === me.peerId) {
+      const nextAdmin = [...room.clients][0];
 
-        const next = room.clients.values().next().value;
+      if (nextAdmin) {
+        room.adminId = nextAdmin.peerId;
+        nextAdmin.isAdmin = true;
 
-        room.host = next
-          ? next.peerId
-          : null;
+        send(nextAdmin.ws, {
+          type: "became-admin",
+          message: "Você agora é o administrador da sala."
+        });
 
-        if (next) {
-          broadcast(room, {
-            type: "host-changed",
-            peerId: room.host
-          });
-        }
+        broadcast(room, {
+          type: "participants-refresh",
+          participants: [...room.clients].map(publicParticipant)
+        });
       }
     }
 
@@ -499,13 +504,12 @@ wss.on("connection", (ws) => {
   });
 });
 
-// =========================
-// KEEP ALIVE
-// =========================
+/* =========================
+   HEARTBEAT
+========================= */
+
 setInterval(() => {
-
   for (const ws of wss.clients) {
-
     if (!ws.isAlive) {
       try {
         ws.terminate();
@@ -520,12 +524,12 @@ setInterval(() => {
       ws.ping();
     } catch {}
   }
-
 }, 30000);
 
-// =========================
-// SERVIDOR
-// =========================
+/* =========================
+   SERVIDOR
+========================= */
+
 server.listen(PORT, "0.0.0.0", () => {
   console.log(
     `Hype Roleplay rodando na porta ${PORT}`
