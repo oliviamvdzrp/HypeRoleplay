@@ -1,8 +1,7 @@
 /* =========================================================
    HYPE ROLEPLAY
-   Sala de transmissão WebRTC
-   PC = transmitir + microfone
-   Android/iPhone = somente assistir
+   COMPARTILHAMENTO DE TELA - WEBRTC
+   PC = transmite / Android e iPhone = assistem
 ========================================================= */
 
 const $ = id => document.getElementById(id);
@@ -69,22 +68,21 @@ let micEnabled = false;
 const peers = new Map();
 const participants = new Map();
 
-let toastTimer = null;
-
 const reconnectState = {
     attempts: 0,
     timer: null
 };
+
+let toastTimer = null;
 
 /* =========================================================
    MOBILE
 ========================================================= */
 
 function detectMobile() {
-
-    return /Android|iPhone|iPad|iPod|Mobile/i
-        .test(navigator.userAgent || "");
-
+    return /Android|iPhone|iPad|iPod|Mobile/i.test(
+        navigator.userAgent || ""
+    );
 }
 
 isMobile = detectMobile();
@@ -108,7 +106,6 @@ function toast(message) {
     toastTimer = setTimeout(() => {
         toastEl.classList.remove("show");
     }, 3000);
-
 }
 
 /* =========================================================
@@ -117,31 +114,20 @@ function toast(message) {
 
 function getRoomFromUrl() {
 
-    const url =
-        new URL(window.location.href);
+    const url = new URL(window.location.href);
 
     return (
         url.searchParams.get("room") || ""
     ).trim();
-
 }
 
 function updateUrl(room) {
 
-    const url =
-        new URL(window.location.href);
+    const url = new URL(window.location.href);
 
-    url.searchParams.set(
-        "room",
-        room
-    );
+    url.searchParams.set("room", room);
 
-    history.replaceState(
-        {},
-        "",
-        url
-    );
-
+    history.replaceState({}, "", url);
 }
 
 /* =========================================================
@@ -159,99 +145,85 @@ function generateRoom() {
 
         result += chars[
             Math.floor(
-                Math.random() *
-                chars.length
+                Math.random() * chars.length
             )
         ];
-
     }
 
     return result;
-
 }
 
 /* =========================================================
-   CRIAR SALA
+   CRIAR
 ========================================================= */
 
-createBtn?.addEventListener(
-    "click",
-    () => {
+createBtn?.addEventListener("click", () => {
 
-        const name =
-            nameHome.value.trim();
+    const name =
+        nameHome?.value.trim();
 
-        if (!name) {
+    if (!name) {
 
-            toast("Digite seu nome primeiro.");
+        toast("Digite seu nome primeiro.");
 
-            nameHome.focus();
+        nameHome?.focus();
 
-            return;
-        }
-
-        const room =
-            generateRoom();
-
-        localStorage.setItem(
-            "hype_name",
-            name
-        );
-
-        enterRoom(
-            room,
-            name
-        );
-
+        return;
     }
-);
+
+    localStorage.setItem(
+        "hype_name",
+        name
+    );
+
+    enterRoom(
+        generateRoom(),
+        name
+    );
+});
 
 /* =========================================================
    ENTRAR
 ========================================================= */
 
-joinBtn?.addEventListener(
-    "click",
-    () => {
+joinBtn?.addEventListener("click", () => {
 
-        const name =
-            nameHome.value.trim();
+    const name =
+        nameHome?.value.trim();
 
-        const room =
-            roomInput.value
-                .trim()
-                .toUpperCase();
+    const room =
+        roomInput?.value
+            .trim()
+            .toUpperCase();
 
-        if (!name) {
+    if (!name) {
 
-            toast("Digite seu nome primeiro.");
+        toast("Digite seu nome primeiro.");
 
-            nameHome.focus();
+        nameHome?.focus();
 
-            return;
-        }
-
-        if (!room) {
-
-            toast("Digite o código da sala.");
-
-            roomInput.focus();
-
-            return;
-        }
-
-        localStorage.setItem(
-            "hype_name",
-            name
-        );
-
-        enterRoom(
-            room,
-            name
-        );
-
+        return;
     }
-);
+
+    if (!room) {
+
+        toast("Digite o código da sala.");
+
+        roomInput?.focus();
+
+        return;
+    }
+
+    localStorage.setItem(
+        "hype_name",
+        name
+    );
+
+    enterRoom(
+        room,
+        name
+    );
+});
 
 roomInput?.addEventListener(
     "keydown",
@@ -260,7 +232,6 @@ roomInput?.addEventListener(
         if (event.key === "Enter") {
             joinBtn?.click();
         }
-
     }
 );
 
@@ -271,7 +242,6 @@ nameHome?.addEventListener(
         if (event.key === "Enter") {
             createBtn?.click();
         }
-
     }
 );
 
@@ -279,23 +249,15 @@ nameHome?.addEventListener(
    ENTRAR NA SALA
 ========================================================= */
 
-function enterRoom(
-    room,
-    name
-) {
+function enterRoom(room, name) {
 
-    roomId =
-        room
-            .replace(
-                /[^a-zA-Z0-9_-]/g,
-                ""
-            )
-            .slice(0, 32);
+    roomId = String(room)
+        .replace(/[^a-zA-Z0-9_-]/g, "")
+        .slice(0, 32);
 
-    myName =
-        name
-            .trim()
-            .slice(0, 30);
+    myName = String(name)
+        .trim()
+        .slice(0, 30);
 
     if (!roomId) {
 
@@ -307,7 +269,6 @@ function enterRoom(
     updateUrl(roomId);
 
     home?.classList.add("hidden");
-
     roomPage?.classList.remove("hidden");
 
     if (roomCodeEl) {
@@ -315,12 +276,10 @@ function enterRoom(
     }
 
     if (roomStatus) {
-        roomStatus.textContent =
-            "Conectando...";
+        roomStatus.textContent = "Conectando...";
     }
 
     connectSocket();
-
 }
 
 /* =========================================================
@@ -339,7 +298,6 @@ function websocketUrl() {
         "//" +
         window.location.host
     );
-
 }
 
 function connectSocket() {
@@ -355,14 +313,12 @@ function connectSocket() {
     }
 
     if (roomStatus) {
-        roomStatus.textContent =
-            "Conectando...";
+        roomStatus.textContent = "Conectando...";
     }
 
-    socket =
-        new WebSocket(
-            websocketUrl()
-        );
+    socket = new WebSocket(
+        websocketUrl()
+    );
 
     socket.addEventListener(
         "open",
@@ -371,8 +327,7 @@ function connectSocket() {
             reconnectState.attempts = 0;
 
             if (roomStatus) {
-                roomStatus.textContent =
-                    "Conectado";
+                roomStatus.textContent = "Conectado";
             }
 
             send({
@@ -381,7 +336,6 @@ function connectSocket() {
                 name: myName,
                 mobile: isMobile
             });
-
         }
     );
 
@@ -392,21 +346,13 @@ function connectSocket() {
             let message;
 
             try {
-
                 message =
-                    JSON.parse(
-                        event.data
-                    );
-
+                    JSON.parse(event.data);
             } catch {
-
                 return;
             }
 
-            await handleMessage(
-                message
-            );
-
+            await handleMessage(message);
         }
     );
 
@@ -419,10 +365,7 @@ function connectSocket() {
                     "Desconectado";
             }
 
-            if (roomId) {
-                scheduleReconnect();
-            }
-
+            scheduleReconnect();
         }
     );
 
@@ -434,15 +377,9 @@ function connectSocket() {
                 roomStatus.textContent =
                     "Erro de conexão";
             }
-
         }
     );
-
 }
-
-/* =========================================================
-   RECONEXÃO
-========================================================= */
 
 function scheduleReconnect() {
 
@@ -455,28 +392,18 @@ function scheduleReconnect() {
     const delay =
         Math.min(
             10000,
-            1000 *
-            reconnectState.attempts
+            1000 * reconnectState.attempts
         );
 
     reconnectState.timer =
-        setTimeout(
-            () => {
+        setTimeout(() => {
 
-                reconnectState.timer =
-                    null;
+            reconnectState.timer = null;
 
-                connectSocket();
+            connectSocket();
 
-            },
-            delay
-        );
-
+        }, delay);
 }
-
-/* =========================================================
-   SEND
-========================================================= */
 
 function send(message) {
 
@@ -492,7 +419,6 @@ function send(message) {
     );
 
     return true;
-
 }
 
 /* =========================================================
@@ -504,9 +430,7 @@ async function handleMessage(msg) {
     switch (msg.type) {
 
         case "joined":
-
             await handleJoined(msg);
-
             break;
 
         case "participant-joined":
@@ -515,22 +439,6 @@ async function handleMessage(msg) {
                 addParticipant(
                     msg.participant
                 );
-            }
-
-            /*
-             * Quem já está na sala cria
-             * conexão com o novo usuário.
-             */
-            if (
-                msg.participant &&
-                msg.participant.peerId !== myPeerId
-            ) {
-
-                await createPeerConnection(
-                    msg.participant.peerId,
-                    true
-                );
-
             }
 
             break;
@@ -621,9 +529,7 @@ async function handleMessage(msg) {
             );
 
             break;
-
     }
-
 }
 
 /* =========================================================
@@ -632,18 +538,13 @@ async function handleMessage(msg) {
 
 async function handleJoined(msg) {
 
-    myPeerId =
-        msg.peerId;
+    myPeerId = msg.peerId;
+    roomId = msg.room;
 
-    roomId =
-        msg.room;
-
-    isAdmin =
-        Boolean(msg.admin);
+    isAdmin = Boolean(msg.admin);
 
     if (roomCodeEl) {
-        roomCodeEl.textContent =
-            roomId;
+        roomCodeEl.textContent = roomId;
     }
 
     refreshParticipants(
@@ -653,9 +554,9 @@ async function handleJoined(msg) {
     updateAdminInterface();
 
     /*
-     * Conectar aos usuários que já estavam
-     * na sala.
+     * Conecta com quem já estava na sala.
      */
+
     for (
         const participant
         of msg.participants || []
@@ -672,19 +573,14 @@ async function handleJoined(msg) {
             participant.peerId,
             true
         );
-
     }
 
     if (isMobile) {
 
-        hideMobileControls();
-
         toast(
-            "Modo espectador ativado. Você pode assistir às transmissões."
+            "Modo espectador: no celular você pode assistir às transmissões."
         );
-
     }
-
 }
 
 /* =========================================================
@@ -695,20 +591,15 @@ function refreshParticipants(list) {
 
     participants.clear();
 
-    for (
-        const participant
-        of list
-    ) {
+    for (const participant of list) {
 
         participants.set(
             participant.peerId,
             participant
         );
-
     }
 
     renderParticipants();
-
 }
 
 function addParticipant(participant) {
@@ -719,7 +610,6 @@ function addParticipant(participant) {
     );
 
     renderParticipants();
-
 }
 
 function updateParticipant(participant) {
@@ -730,17 +620,13 @@ function updateParticipant(participant) {
     );
 
     renderParticipants();
-
 }
 
 function removeParticipant(peerId) {
 
-    participants.delete(
-        peerId
-    );
+    participants.delete(peerId);
 
-    const pc =
-        peers.get(peerId);
+    const pc = peers.get(peerId);
 
     if (pc) {
 
@@ -749,17 +635,15 @@ function removeParticipant(peerId) {
         } catch {}
 
         peers.delete(peerId);
-
     }
 
     removeVideo(peerId);
 
     renderParticipants();
-
 }
 
 /* =========================================================
-   PARTICIPANTES UI
+   PARTICIPANTES - INTERFACE
 ========================================================= */
 
 function renderParticipants() {
@@ -778,28 +662,25 @@ function renderParticipants() {
         const row =
             document.createElement("div");
 
-        row.className =
-            "participant";
+        row.className = "participant";
 
         const avatar =
             document.createElement("div");
 
-        avatar.className =
-            "avatar";
+        avatar.className = "avatar";
 
         avatar.textContent =
             (
                 participant.name ||
                 "?"
             )
-                .charAt(0)
-                .toUpperCase();
+            .charAt(0)
+            .toUpperCase();
 
         const name =
             document.createElement("div");
 
-        name.className =
-            "pname";
+        name.className = "pname";
 
         name.textContent =
             participant.name ||
@@ -813,13 +694,9 @@ function renderParticipants() {
             badge.className =
                 "admin-badge";
 
-            badge.textContent =
-                "ADM";
+            badge.textContent = "ADM";
 
-            name.appendChild(
-                badge
-            );
-
+            name.appendChild(badge);
         }
 
         const device =
@@ -862,12 +739,12 @@ function renderParticipants() {
                 "sharing-dot";
 
             row.appendChild(dot);
-
         }
 
         /*
-         * Controles ADM
+         * BOTÕES DO ADM
          */
+
         if (
             isAdmin &&
             participant.peerId !== myPeerId
@@ -882,21 +759,19 @@ function renderParticipants() {
             const mute =
                 document.createElement("button");
 
-            mute.type =
-                "button";
+            mute.type = "button";
 
-            mute.className =
-                "mini-btn";
-
-            mute.textContent =
-                participant.muted
-                    ? "🔊"
-                    : "🔇";
+            mute.className = "mini-btn";
 
             mute.title =
                 participant.muted
                     ? "Ativar microfone"
                     : "Silenciar";
+
+            mute.textContent =
+                participant.muted
+                    ? "🔊"
+                    : "🔇";
 
             mute.addEventListener(
                 "click",
@@ -908,24 +783,20 @@ function renderParticipants() {
                         participant.peerId,
                         !participant.muted
                     );
-
                 }
             );
 
             const kick =
                 document.createElement("button");
 
-            kick.type =
-                "button";
+            kick.type = "button";
 
             kick.className =
                 "mini-btn kick-btn";
 
-            kick.textContent =
-                "✕";
+            kick.title = "Expulsar usuário";
 
-            kick.title =
-                "Expulsar";
+            kick.textContent = "✕";
 
             kick.addEventListener(
                 "click",
@@ -936,7 +807,6 @@ function renderParticipants() {
                     adminKickUser(
                         participant.peerId
                     );
-
                 }
             );
 
@@ -944,22 +814,15 @@ function renderParticipants() {
             actions.appendChild(kick);
 
             row.appendChild(actions);
-
         }
 
         participantsEl.appendChild(row);
-
     }
 
     if (countEl) {
-
         countEl.textContent =
-            String(
-                participants.size
-            );
-
+            String(participants.size);
     }
-
 }
 
 /* =========================================================
@@ -997,92 +860,72 @@ function updateAdminInterface() {
         adminPanel?.classList.add(
             "hidden"
         );
-
     }
 
     renderParticipants();
-
 }
 
-window.toggleAdminPanel =
-    function () {
+window.toggleAdminPanel = function () {
 
-        if (!isAdmin) {
-
-            toast(
-                "Somente o administrador pode abrir este menu."
-            );
-
-            return;
-        }
-
-        adminPanel?.classList.toggle(
-            "hidden"
-        );
-
-    };
-
-window.adminMuteAll =
-    function () {
-
-        if (!isAdmin) {
-            return;
-        }
-
-        send({
-            type:
-                "admin-mute-all"
-        });
+    if (!isAdmin) {
 
         toast(
-            "Microfones silenciados."
+            "Somente o administrador pode abrir este menu."
         );
 
-    };
+        return;
+    }
 
-window.adminStopShares =
-    function () {
+    adminPanel?.classList.toggle(
+        "hidden"
+    );
+};
 
-        if (!isAdmin) {
-            return;
-        }
-
-        send({
-            type:
-                "admin-stop-shares"
-        });
-
-        toast(
-            "Transmissões encerradas."
-        );
-
-    };
-
-window.adminCopyInvite =
-    function () {
-
-        copyInvite();
-
-    };
-
-function adminMuteUser(
-    peerId,
-    muted
-) {
+window.adminMuteAll = function () {
 
     if (!isAdmin) {
         return;
     }
 
     send({
-        type:
-            "admin-mute",
-
-        peerId,
-
-        muted
+        type: "admin-mute-all"
     });
 
+    toast(
+        "Todos os participantes foram silenciados."
+    );
+};
+
+window.adminStopShares = function () {
+
+    if (!isAdmin) {
+        return;
+    }
+
+    send({
+        type: "admin-stop-shares"
+    });
+
+    toast(
+        "Transmissões encerradas."
+    );
+};
+
+window.adminCopyInvite = function () {
+    copyInvite();
+};
+
+function adminMuteUser(peerId, muted) {
+
+    if (!isAdmin) {
+        return;
+    }
+
+    send({
+        type: "admin-mute",
+        peerId,
+        muted
+    });
 }
 
 function adminKickUser(peerId) {
@@ -1108,12 +951,9 @@ function adminKickUser(peerId) {
     }
 
     send({
-        type:
-            "admin-kick",
-
+        type: "admin-kick",
         peerId
     });
-
 }
 
 /* =========================================================
@@ -1131,31 +971,24 @@ function createPeerConnection(
 
     const pc =
         new RTCPeerConnection({
-
             iceServers: [
-
                 {
                     urls:
                         "stun:stun.l.google.com:19302"
                 },
-
                 {
                     urls:
                         "stun:stun1.l.google.com:19302"
                 }
-
             ]
-
         });
 
-    peers.set(
-        peerId,
-        pc
-    );
+    peers.set(peerId, pc);
 
     /*
      * Microfone
      */
+
     if (localMicStream) {
 
         for (
@@ -1167,14 +1000,13 @@ function createPeerConnection(
                 track,
                 localMicStream
             );
-
         }
-
     }
 
     /*
      * Tela
      */
+
     if (localScreenStream) {
 
         for (
@@ -1186,94 +1018,71 @@ function createPeerConnection(
                 track,
                 localScreenStream
             );
-
         }
-
     }
 
-    pc.onicecandidate =
-        event => {
+    pc.onicecandidate = event => {
 
-            if (event.candidate) {
+        if (!event.candidate) {
+            return;
+        }
 
-                send({
-                    type:
-                        "signal",
-
-                    to:
-                        peerId,
-
-                    signal: {
-                        type:
-                            "candidate",
-
-                        candidate:
-                            event.candidate
-                    }
-
-                });
-
+        send({
+            type: "signal",
+            to: peerId,
+            signal: {
+                type: "candidate",
+                candidate: event.candidate
             }
+        });
+    };
 
-        };
+    pc.ontrack = event => {
 
-    /*
-     * RECEBER ÁUDIO/VÍDEO
-     */
-    pc.ontrack =
-        event => {
+        let stream =
+            event.streams[0];
 
-            let stream =
-                event.streams?.[0];
+        /*
+         * Alguns navegadores podem não enviar
+         * o stream diretamente.
+         */
 
-            /*
-             * Alguns navegadores podem não
-             * fornecer event.streams.
-             */
-            if (!stream) {
+        if (!stream) {
 
-                stream =
-                    new MediaStream();
+            stream =
+                new MediaStream();
 
-                stream.addTrack(
-                    event.track
-                );
-
-            }
-
-            showRemoteVideo(
-                peerId,
-                stream
+            stream.addTrack(
+                event.track
             );
+        }
 
-        };
+        showRemoteVideo(
+            peerId,
+            stream
+        );
+    };
 
-    pc.onconnectionstatechange =
-        () => {
+    pc.onconnectionstatechange = () => {
 
-            if (
-                pc.connectionState ===
-                "failed"
-            ) {
+        if (
+            pc.connectionState ===
+            "failed"
+        ) {
 
-                try {
-                    pc.restartIce();
-                } catch {}
+            try {
+                pc.restartIce();
+            } catch {}
+        }
 
-            }
+        if (
+            pc.connectionState ===
+                "closed"
+        ) {
 
-            if (
-                pc.connectionState ===
-                    "closed"
-            ) {
-
-                removeVideo(
-                    peerId
-                );
-
-            }
-
-        };
+            removeVideo(peerId);
+        }
+    };
 
     if (initiator) {
 
@@ -1281,15 +1090,13 @@ function createPeerConnection(
             peerId,
             pc
         );
-
     }
 
     return pc;
-
 }
 
 /* =========================================================
-   OFFER
+   OFERTA
 ========================================================= */
 
 async function makeOffer(
@@ -1307,23 +1114,12 @@ async function makeOffer(
         );
 
         send({
-
-            type:
-                "signal",
-
-            to:
-                peerId,
-
+            type: "signal",
+            to: peerId,
             signal: {
-
-                type:
-                    "offer",
-
-                sdp:
-                    pc.localDescription
-
+                type: "offer",
+                sdp: pc.localDescription
             }
-
         });
 
     } catch (error) {
@@ -1332,9 +1128,7 @@ async function makeOffer(
             "Erro ao criar oferta:",
             error
         );
-
     }
-
 }
 
 /* =========================================================
@@ -1343,8 +1137,7 @@ async function makeOffer(
 
 async function handleSignal(msg) {
 
-    const peerId =
-        msg.from;
+    const peerId = msg.from;
 
     let pc =
         peers.get(peerId);
@@ -1356,21 +1149,26 @@ async function handleSignal(msg) {
                 peerId,
                 false
             );
-
     }
 
-    const signal =
-        msg.signal;
+    const signal = msg.signal;
+
+    if (!signal) {
+        return;
+    }
 
     try {
 
-        if (
-            signal.type ===
-            "offer"
-        ) {
+        if (signal.type === "offer") {
+
+            /*
+             * Evita problemas de negociação
+             */
 
             await pc.setRemoteDescription(
-                signal.sdp
+                new RTCSessionDescription(
+                    signal.sdp
+                )
             );
 
             const answer =
@@ -1381,49 +1179,40 @@ async function handleSignal(msg) {
             );
 
             send({
-
-                type:
-                    "signal",
-
-                to:
-                    peerId,
-
+                type: "signal",
+                to: peerId,
                 signal: {
-
-                    type:
-                        "answer",
-
-                    sdp:
-                        pc.localDescription
-
+                    type: "answer",
+                    sdp: pc.localDescription
                 }
-
             });
-
         }
 
         else if (
-            signal.type ===
-            "answer"
+            signal.type === "answer"
         ) {
 
             await pc.setRemoteDescription(
-                signal.sdp
+                new RTCSessionDescription(
+                    signal.sdp
+                )
             );
-
         }
 
         else if (
-            signal.type ===
-            "candidate"
+            signal.type === "candidate"
         ) {
 
-            if (signal.candidate) {
+            if (
+                signal.candidate
+            ) {
 
                 try {
 
                     await pc.addIceCandidate(
-                        signal.candidate
+                        new RTCIceCandidate(
+                            signal.candidate
+                        )
                     );
 
                 } catch (error) {
@@ -1432,11 +1221,8 @@ async function handleSignal(msg) {
                         "ICE candidate:",
                         error
                     );
-
                 }
-
             }
-
         }
 
     } catch (error) {
@@ -1445,9 +1231,7 @@ async function handleSignal(msg) {
             "Erro WebRTC:",
             error
         );
-
     }
-
 }
 
 /* =========================================================
@@ -1480,30 +1264,13 @@ function showRemoteVideo(
         video =
             document.createElement("video");
 
-        video.autoplay =
-            true;
+        video.autoplay = true;
+        video.playsInline = true;
+        video.controls = false;
+        video.muted = false;
+        video.volume = 1;
 
-        video.playsInline =
-            true;
-
-        video.controls =
-            false;
-
-        /*
-         * IMPORTANTE:
-         * Não deixar muted.
-         * Assim o áudio da transmissão
-         * pode sair.
-         */
-        video.muted =
-            false;
-
-        video.volume =
-            1;
-
-        card.appendChild(
-            video
-        );
+        card.appendChild(video);
 
         const name =
             document.createElement("div");
@@ -1512,50 +1279,37 @@ function showRemoteVideo(
             "video-name";
 
         const participant =
-            participants.get(
-                peerId
-            );
+            participants.get(peerId);
 
         name.textContent =
             participant?.name ||
             "Participante";
 
-        card.appendChild(
-            name
-        );
+        card.appendChild(name);
 
-        videos?.appendChild(
-            card
-        );
+        videos?.appendChild(card);
 
         /*
-         * Clicar no vídeo libera áudio
-         * em navegadores que bloqueiam
-         * autoplay com som.
+         * Clique libera áudio em navegadores
+         * que bloqueiam autoplay.
          */
+
         card.addEventListener(
             "click",
             () => {
 
-                video.muted =
-                    false;
-
-                video.volume =
-                    1;
+                video.muted = false;
+                video.volume = 1;
 
                 video.play()
                     .catch(() => {});
-
             }
         );
 
     } else {
 
         video =
-            card.querySelector(
-                "video"
-            );
-
+            card.querySelector("video");
     }
 
     if (!video) {
@@ -1563,20 +1317,11 @@ function showRemoteVideo(
     }
 
     if (
-        video.srcObject !==
-        stream
+        video.srcObject !== stream
     ) {
 
-        video.srcObject =
-            stream;
-
+        video.srcObject = stream;
     }
-
-    video.muted =
-        false;
-
-    video.volume =
-        1;
 
     video.play()
         .catch(() => {
@@ -1584,13 +1329,11 @@ function showRemoteVideo(
             card.classList.add(
                 "audio-locked"
             );
-
         });
 
     emptyState?.classList.add(
         "hidden"
     );
-
 }
 
 /* =========================================================
@@ -1616,9 +1359,7 @@ function removeVideo(peerId) {
         emptyState?.classList.remove(
             "hidden"
         );
-
     }
-
 }
 
 /* =========================================================
@@ -1661,30 +1402,16 @@ async function startScreenShare() {
 
         const stream =
             await navigator.mediaDevices.getDisplayMedia({
-
                 video: {
                     frameRate: {
                         ideal: 30,
                         max: 60
                     }
                 },
-
-                /*
-                 * Tenta capturar áudio do sistema.
-                 * O navegador só disponibiliza áudio
-                 * quando a fonte escolhida permite.
-                 */
                 audio: true
-
             });
 
-        localScreenStream =
-            stream;
-
-        /*
-         * MOSTRAR A PRÓPRIA TRANSMISSÃO
-         */
-        showLocalScreen(stream);
+        localScreenStream = stream;
 
         const videoTrack =
             stream.getVideoTracks()[0];
@@ -1694,19 +1421,15 @@ async function startScreenShare() {
             videoTrack.addEventListener(
                 "ended",
                 () => {
-
-                    stopScreenShare(
-                        true
-                    );
-
+                    stopScreenShare(true);
                 }
             );
-
         }
 
         /*
-         * Adicionar tela aos peers
+         * Adiciona a tela aos peers
          */
+
         for (
             const [
                 peerId,
@@ -1715,33 +1438,43 @@ async function startScreenShare() {
             of peers
         ) {
 
+            /*
+             * Evita adicionar a mesma track
+             * duas vezes.
+             */
+
+            const existingSenders =
+                pc.getSenders();
+
             for (
                 const track
                 of stream.getTracks()
             ) {
 
-                pc.addTrack(
-                    track,
-                    stream
-                );
+                const alreadyAdded =
+                    existingSenders.some(
+                        sender =>
+                            sender.track === track
+                    );
 
+                if (!alreadyAdded) {
+
+                    pc.addTrack(
+                        track,
+                        stream
+                    );
+                }
             }
 
             await renegotiate(
                 peerId,
                 pc
             );
-
         }
 
         send({
-
-            type:
-                "sharing",
-
-            value:
-                true
-
+            type: "sharing",
+            value: true
         });
 
         shareBtn?.classList.add(
@@ -1773,7 +1506,7 @@ async function startScreenShare() {
         ) {
 
             toast(
-                "Compartilhamento cancelado."
+                "Você cancelou o compartilhamento."
             );
 
         } else {
@@ -1781,96 +1514,44 @@ async function startScreenShare() {
             toast(
                 "Não foi possível compartilhar a tela."
             );
-
         }
-
     }
-
 }
 
 /* =========================================================
-   MOSTRAR MINHA PRÓPRIA TELA
+   RENEGOCIAÇÃO
 ========================================================= */
 
-function showLocalScreen(stream) {
+async function renegotiate(
+    peerId,
+    pc
+) {
 
-    if (!videos) {
-        return;
+    try {
+
+        const offer =
+            await pc.createOffer();
+
+        await pc.setLocalDescription(
+            offer
+        );
+
+        send({
+            type: "signal",
+            to: peerId,
+            signal: {
+                type: "offer",
+                sdp: pc.localDescription
+            }
+        });
+
+    } catch (error) {
+
+        console.error(
+            "Renegociação:",
+            error
+        );
     }
-
-    let card =
-        document.getElementById(
-            "my-screen"
-        );
-
-    if (!card) {
-
-        card =
-            document.createElement("div");
-
-        card.className =
-            "video-card local-video";
-
-        card.id =
-            "my-screen";
-
-        const video =
-            document.createElement("video");
-
-        video.autoplay =
-            true;
-
-        video.muted =
-            true;
-
-        video.playsInline =
-            true;
-
-        video.controls =
-            false;
-
-        card.appendChild(
-            video
-        );
-
-        const name =
-            document.createElement("div");
-
-        name.className =
-            "video-name";
-
-        name.textContent =
-            `${myName} • Você`;
-
-        card.appendChild(
-            name
-        );
-
-        videos.prepend(
-            card
-        );
-
-    }
-
-    const video =
-        card.querySelector(
-            "video"
-        );
-
-    if (video) {
-
-        video.srcObject =
-            stream;
-
-        video.play()
-            .catch(() => {});
-
-    }
-
-    emptyState?.classList.add(
-        "hidden"
-    );
-
 }
 
 /* =========================================================
@@ -1891,70 +1572,62 @@ function stopScreenShare(
             try {
                 track.stop();
             } catch {}
-
         }
 
-        localScreenStream =
-            null;
-
+        localScreenStream = null;
     }
 
     /*
-     * Remover apenas os tracks de vídeo
-     * das conexões.
+     * Remove somente os tracks de vídeo
+     * que pertencem à tela.
      */
+
     for (
-        const pc
-        of peers.values()
+        const [
+            peerId,
+            pc
+        ]
+        of peers
     ) {
+
+        const senders =
+            pc.getSenders();
 
         for (
             const sender
-            of pc.getSenders()
+            of senders
         ) {
 
+            const track =
+                sender.track;
+
             if (
-                sender.track &&
-                sender.track.kind ===
-                "video"
+                track &&
+                track.kind === "video"
             ) {
 
                 try {
-
-                    pc.removeTrack(
-                        sender
-                    );
-
+                    pc.removeTrack(sender);
                 } catch {}
-
             }
-
         }
 
-    }
+        /*
+         * Renegocia para informar que a tela parou.
+         */
 
-    /*
-     * Remover minha prévia.
-     */
-    const localCard =
-        document.getElementById(
-            "my-screen"
+        renegotiate(
+            peerId,
+            pc
         );
-
-    localCard?.remove();
+    }
 
     if (notifyServer) {
 
         send({
-
-            type:
-                "sharing",
-
-            value:
-                false
-
+            type: "sharing",
+            value: false
         });
-
     }
 
     shareBtn?.classList.remove(
@@ -1969,74 +1642,9 @@ function stopScreenShare(
         "hidden"
     );
 
-    if (
-        videos &&
-        videos.children.length === 0
-    ) {
-
-        emptyState?.classList.remove(
-            "hidden"
-        );
-
-    }
-
-    if (notifyServer) {
-
-        toast(
-            "Transmissão encerrada."
-        );
-
-    }
-
-}
-
-/* =========================================================
-   RENEGOCIAR
-========================================================= */
-
-async function renegotiate(
-    peerId,
-    pc
-) {
-
-    try {
-
-        const offer =
-            await pc.createOffer();
-
-        await pc.setLocalDescription(
-            offer
-        );
-
-        send({
-
-            type:
-                "signal",
-
-            to:
-                peerId,
-
-            signal: {
-
-                type:
-                    "offer",
-
-                sdp:
-                    pc.localDescription
-
-            }
-
-        });
-
-    } catch (error) {
-
-        console.error(
-            "Renegociação:",
-            error
-        );
-
-    }
-
+    toast(
+        "Transmissão encerrada."
+    );
 }
 
 /* =========================================================
@@ -2056,27 +1664,24 @@ async function toggleMicrophone() {
 
     try {
 
+        /*
+         * Primeiro clique
+         */
+
         if (!localMicStream) {
 
             localMicStream =
                 await navigator.mediaDevices.getUserMedia({
-
-                    audio: {
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        autoGainControl: true
-                    },
-
+                    audio: true,
                     video: false
-
                 });
 
-            micEnabled =
-                true;
+            micEnabled = true;
 
             /*
-             * Adicionar microfone aos peers.
+             * Adiciona aos peers.
              */
+
             for (
                 const [
                     peerId,
@@ -2094,14 +1699,12 @@ async function toggleMicrophone() {
                         track,
                         localMicStream
                     );
-
                 }
 
                 await renegotiate(
                     peerId,
                     pc
                 );
-
             }
 
         } else {
@@ -2116,21 +1719,14 @@ async function toggleMicrophone() {
 
                 track.enabled =
                     micEnabled;
-
             }
-
         }
 
         updateMicButton();
 
         send({
-
-            type:
-                "mic",
-
-            muted:
-                !micEnabled
-
+            type: "mic",
+            muted: !micEnabled
         });
 
     } catch (error) {
@@ -2141,11 +1737,9 @@ async function toggleMicrophone() {
         );
 
         toast(
-            "Não foi possível acessar o microfone. Verifique a permissão do navegador."
+            "Não foi possível acessar o microfone."
         );
-
     }
-
 }
 
 /* =========================================================
@@ -2156,13 +1750,11 @@ function setLocalMute(muted) {
 
     if (!localMicStream) {
 
-        micEnabled =
-            !muted;
+        micEnabled = !muted;
 
         updateMicButton();
 
         return;
-
     }
 
     for (
@@ -2170,13 +1762,10 @@ function setLocalMute(muted) {
         of localMicStream.getAudioTracks()
     ) {
 
-        track.enabled =
-            !muted;
-
+        track.enabled = !muted;
     }
 
-    micEnabled =
-        !muted;
+    micEnabled = !muted;
 
     updateMicButton();
 
@@ -2185,7 +1774,6 @@ function setLocalMute(muted) {
             ? "Seu microfone foi silenciado pelo administrador."
             : "Seu microfone foi ativado."
     );
-
 }
 
 /* =========================================================
@@ -2207,9 +1795,7 @@ function updateMicButton() {
 
         micBtn.innerHTML =
             "<span>🔇</span> Microfone desligado";
-
     }
-
 }
 
 /* =========================================================
@@ -2223,24 +1809,18 @@ chatForm?.addEventListener(
         event.preventDefault();
 
         const text =
-            chatInput.value.trim();
+            chatInput?.value.trim();
 
         if (!text) {
             return;
         }
 
         send({
-
-            type:
-                "chat",
-
+            type: "chat",
             text
-
         });
 
-        chatInput.value =
-            "";
-
+        chatInput.value = "";
     }
 );
 
@@ -2253,14 +1833,12 @@ function addChatMessage(message) {
     const item =
         document.createElement("div");
 
-    item.className =
-        "message";
+    item.className = "message";
 
     const meta =
         document.createElement("div");
 
-    meta.className =
-        "meta";
+    meta.className = "meta";
 
     meta.textContent =
         message.from ||
@@ -2269,23 +1847,18 @@ function addChatMessage(message) {
     const text =
         document.createElement("div");
 
-    text.className =
-        "text";
+    text.className = "text";
 
     text.textContent =
-        message.text ||
-        "";
+        message.text || "";
 
     item.appendChild(meta);
     item.appendChild(text);
 
-    chatMessages.appendChild(
-        item
-    );
+    chatMessages.appendChild(item);
 
     chatMessages.scrollTop =
         chatMessages.scrollHeight;
-
 }
 
 /* =========================================================
@@ -2305,7 +1878,6 @@ function getInviteUrl() {
     );
 
     return url.toString();
-
 }
 
 async function copyInvite() {
@@ -2330,8 +1902,7 @@ async function copyInvite() {
                 "textarea"
             );
 
-        textarea.value =
-            invite;
+        textarea.value = invite;
 
         document.body.appendChild(
             textarea
@@ -2348,9 +1919,7 @@ async function copyInvite() {
         toast(
             "Convite copiado!"
         );
-
     }
-
 }
 
 copyBtn?.addEventListener(
@@ -2386,12 +1955,9 @@ function leaveRoom() {
             try {
                 track.stop();
             } catch {}
-
         }
 
-        localMicStream =
-            null;
-
+        localMicStream = null;
     }
 
     for (
@@ -2402,7 +1968,6 @@ function leaveRoom() {
         try {
             pc.close();
         } catch {}
-
     }
 
     peers.clear();
@@ -2413,9 +1978,7 @@ function leaveRoom() {
             socket.close();
         } catch {}
 
-        socket =
-            null;
-
+        socket = null;
     }
 
     participants.clear();
@@ -2452,7 +2015,6 @@ function leaveRoom() {
     isAdmin = false;
 
     updateAdminInterface();
-
 }
 
 /* =========================================================
@@ -2482,10 +2044,14 @@ micBtn?.addEventListener(
 );
 
 /* =========================================================
-   CELULAR
+   MOBILE
 ========================================================= */
 
-function hideMobileControls() {
+function configureMobile() {
+
+    if (!isMobile) {
+        return;
+    }
 
     shareBtn?.classList.add(
         "hidden"
@@ -2502,33 +2068,33 @@ function hideMobileControls() {
     micBtn?.classList.add(
         "hidden"
     );
-
 }
 
-if (isMobile) {
-    hideMobileControls();
-}
+configureMobile();
 
 /* =========================================================
-   LOAD
+   INICIALIZAÇÃO
 ========================================================= */
 
 window.addEventListener(
     "load",
     () => {
 
-        const room =
-            getRoomFromUrl();
-
         const savedName =
             localStorage.getItem(
                 "hype_name"
             );
 
-        if (savedName && nameHome) {
+        if (
+            savedName &&
+            nameHome
+        ) {
             nameHome.value =
                 savedName;
         }
+
+        const room =
+            getRoomFromUrl();
 
         if (
             room &&
@@ -2539,9 +2105,7 @@ window.addEventListener(
                 room,
                 savedName
             );
-
         }
-
     }
 );
 
@@ -2562,47 +2126,12 @@ nameHome?.addEventListener(
                 "hype_name",
                 name
             );
-
         }
-
     }
 );
 
 /* =========================================================
-   AUTOPLAY / ÁUDIO
-========================================================= */
-
-/*
- * Alguns navegadores bloqueiam áudio automático.
- * Quando o usuário clicar em qualquer lugar da página,
- * tentamos liberar os vídeos.
- */
-document.addEventListener(
-    "click",
-    () => {
-
-        document
-            .querySelectorAll(
-                "#videos video"
-            )
-            .forEach(video => {
-
-                video.muted = false;
-                video.volume = 1;
-
-                video.play()
-                    .catch(() => {});
-
-            });
-
-    },
-    {
-        passive: true
-    }
-);
-
-/* =========================================================
-   BEFORE UNLOAD
+   SEGURANÇA
 ========================================================= */
 
 window.addEventListener(
@@ -2614,8 +2143,10 @@ window.addEventListener(
             try {
                 socket.close();
             } catch {}
-
         }
-
     }
 );
+
+/* =========================================================
+   FIM
+========================================================= */
