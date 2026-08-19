@@ -1,2152 +1,1207 @@
-/* =========================================================
-   HYPE ROLEPLAY
-   COMPARTILHAMENTO DE TELA - WEBRTC
-   PC = transmite / Android e iPhone = assistem
-========================================================= */
+"use strict";
 
-const $ = id => document.getElementById(id);
+const path = require("path");
+const http = require("http");
+const express = require("express");
+const { WebSocketServer } = require("ws");
+const crypto = require("crypto");
 
-/* =========================================================
-   ELEMENTOS
-========================================================= */
+const app = express();
+const server = http.createServer(app);
 
-const home = $("home");
-const roomPage = $("room");
-
-const nameHome = $("nameHome");
-const roomInput = $("roomInput");
-
-const createBtn = $("createBtn");
-const joinBtn = $("joinBtn");
-
-const roomCodeEl = $("roomCode");
-const roomStatus = $("roomStatus");
-
-const copyBtn = $("copyBtn");
-const leaveBtn = $("leaveBtn");
-
-const shareBtn = $("shareBtn");
-const shareCenterBtn = $("shareCenterBtn");
-const stopShareBtn = $("stopShareBtn");
-
-const micBtn = $("micBtn");
-const inviteBtn = $("inviteBtn");
-
-const videos = $("videos");
-const emptyState = $("emptyState");
-
-const participantsEl = $("participants");
-const countEl = $("count");
-
-const chatForm = $("chatForm");
-const chatInput = $("chatInput");
-const chatMessages = $("chatMessages");
-
-const toastEl = $("toast");
-
-const adminPanel = $("adminPanel");
-const adminButton = $("adminButton");
+const PORT = process.env.PORT || 10000;
 
 /* =========================================================
-   ESTADO
+EXPRESS
 ========================================================= */
 
-let socket = null;
+app.use(express.json());
 
-let roomId = "";
-let myPeerId = "";
-let myName = "";
-
-let isAdmin = false;
-let isMobile = false;
-
-let localScreenStream = null;
-let localMicStream = null;
-
-let micEnabled = false;
-
-const peers = new Map();
-const participants = new Map();
-
-const reconnectState = {
-    attempts: 0,
-    timer: null
-};
-
-let toastTimer = null;
+app.use(
+express.static(
+path.join(__dirname, "public")
+)
+);
 
 /* =========================================================
-   MOBILE
+ROTAS
 ========================================================= */
 
-function detectMobile() {
-    return /Android|iPhone|iPad|iPod|Mobile/i.test(
-        navigator.userAgent || ""
-    );
-}
+app.get("/health", (req, res) => {
+res.status(200).json({
+ok: true,
+service: "Hype Roleplay",
+rooms: rooms.size
+});
+});
 
-isMobile = detectMobile();
-
-/* =========================================================
-   TOAST
-========================================================= */
-
-function toast(message) {
-
-    if (!toastEl) {
-        alert(message);
-        return;
-    }
-
-    toastEl.textContent = message;
-    toastEl.classList.add("show");
-
-    clearTimeout(toastTimer);
-
-    toastTimer = setTimeout(() => {
-        toastEl.classList.remove("show");
-    }, 3000);
-}
-
-/* =========================================================
-   URL
-========================================================= */
-
-function getRoomFromUrl() {
-
-    const url = new URL(window.location.href);
-
-    return (
-        url.searchParams.get("room") || ""
-    ).trim();
-}
-
-function updateUrl(room) {
-
-    const url = new URL(window.location.href);
-
-    url.searchParams.set("room", room);
-
-    history.replaceState({}, "", url);
-}
-
-/* =========================================================
-   SALA
-========================================================= */
-
-function generateRoom() {
-
-    const chars =
-        "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-
-    let result = "";
-
-    for (let i = 0; i < 6; i++) {
-
-        result += chars[
-            Math.floor(
-                Math.random() * chars.length
-            )
-        ];
-    }
-
-    return result;
-}
-
-/* =========================================================
-   CRIAR
-========================================================= */
-
-createBtn?.addEventListener("click", () => {
-
-    const name =
-        nameHome?.value.trim();
-
-    if (!name) {
-
-        toast("Digite seu nome primeiro.");
-
-        nameHome?.focus();
-
-        return;
-    }
-
-    localStorage.setItem(
-        "hype_name",
-        name
-    );
-
-    enterRoom(
-        generateRoom(),
-        name
-    );
+app.get("/", (req, res) => {
+res.sendFile(
+path.join(
+__dirname,
+"public",
+"index.html"
+)
+);
 });
 
 /* =========================================================
-   ENTRAR
+WEBSOCKET
 ========================================================= */
 
-joinBtn?.addEventListener("click", () => {
+const wss = new WebSocketServer({
+server
+});
 
-    const name =
-        nameHome?.value.trim();
+/* =========================================================
+SALAS
+========================================================= */
 
-    const room =
-        roomInput?.value
-            .trim()
-            .toUpperCase();
+const rooms = new Map();
 
-    if (!name) {
+function createRoom(roomId) {
+const room = {
+id: roomId,
+clients: new Set(),
+adminPeerId: null,
+createdAt: Date.now()
+};
 
-        toast("Digite seu nome primeiro.");
+rooms.set(roomId, room);
 
-        nameHome?.focus();
+return room;
+}
+
+function getRoom(roomId) {
+return rooms.get(roomId);
+}
+
+function getOrCreateRoom(roomId) {
+return (
+getRoom(roomId) ||
+createRoom(roomId)
+);
+}
+
+function removeEmptyRoom(room) {
+if (
+room &&
+room.clients.size === 0
+) {
+rooms.delete(room.id);
+}
+}
+
+/* =========================================================
+PARTICIPANTES
+========================================================= */
+
+function findParticipant(
+room,
+peerId
+) {
+if (!room || !peerId) {
+return null;
+}
+
+for (
+const participant of room.clients
+) {
+if (
+participant.peerId === peerId
+) {
+return participant;
+}
+}
+
+return null;
+}
+
+function getParticipants(room) {
+if (!room) {
+return [];
+}
+
+return Array.from(
+room.clients
+).map(
+participant => ({
+peerId: participant.peerId,
+name: participant.name,
+mobile: participant.mobile,
+sharing: participant.sharing,
+muted: participant.muted,
+admin:
+participant.peerId ===
+room.adminPeerId
+})
+);
+}
+
+/* =========================================================
+WEBSOCKET HELPERS
+========================================================= */
+
+function send(ws, data) {
+if (
+!ws ||
+ws.readyState !== 1
+) {
+return;
+}
+
+try {
+ws.send(
+JSON.stringify(data)
+);
+} catch (error) {
+console.error(
+"Erro ao enviar WebSocket:",
+error.message
+);
+}
+}
+
+function broadcast(
+room,
+data,
+exceptWs = null
+) {
+if (!room) {
+return;
+}
+
+for (
+const participant of room.clients
+) {
+if (
+participant.ws !== exceptWs
+) {
+send(
+participant.ws,
+data
+);
+}
+}
+}
+
+function broadcastAll(
+room,
+data
+) {
+if (!room) {
+return;
+}
+
+for (
+const participant of room.clients
+) {
+send(
+participant.ws,
+data
+);
+}
+}
+
+/* =========================================================
+ATUALIZAR PARTICIPANTE
+========================================================= */
+
+function participantData(
+room,
+participant
+) {
+return {
+peerId: participant.peerId,
+name: participant.name,
+mobile: participant.mobile,
+sharing: participant.sharing,
+muted: participant.muted,
+admin:
+participant.peerId ===
+room.adminPeerId
+};
+}
+
+/* =========================================================
+WEBSOCKET CONNECTION
+========================================================= */
+
+wss.on(
+"connection",
+ws => {
+
+```
+ws.isAlive = true;
+
+ws.roomId = null;
+ws.peerId = null;
+
+/* =====================================================
+   PONG
+===================================================== */
+
+ws.on(
+  "pong",
+  () => {
+    ws.isAlive = true;
+  }
+);
+
+/* =====================================================
+   MENSAGENS
+===================================================== */
+
+ws.on(
+  "message",
+  rawData => {
+
+    let msg;
+
+    try {
+      msg =
+        JSON.parse(
+          rawData.toString()
+        );
+    } catch (error) {
+
+      send(
+        ws,
+        {
+          type: "error",
+          message:
+            "Mensagem inválida."
+        }
+      );
+
+      return;
+    }
+
+    if (
+      !msg ||
+      typeof msg.type !==
+        "string"
+    ) {
+      return;
+    }
+
+    /* =================================================
+       ENTRAR NA SALA
+    ================================================= */
+
+    if (
+      msg.type === "join"
+    ) {
+
+      const roomId =
+        String(
+          msg.room || ""
+        )
+          .replace(
+            /[^a-zA-Z0-9_-]/g,
+            ""
+          )
+          .slice(
+            0,
+            32
+          );
+
+      const name =
+        String(
+          msg.name ||
+            "Convidado"
+        )
+          .trim()
+          .slice(
+            0,
+            30
+          ) ||
+        "Convidado";
+
+      const mobile =
+        Boolean(
+          msg.mobile
+        );
+
+      if (!roomId) {
+
+        send(
+          ws,
+          {
+            type: "error",
+            message:
+              "Sala inválida."
+          }
+        );
 
         return;
+      }
+
+      /*
+       * Impede a mesma conexão
+       * de entrar em duas salas.
+       */
+      if (ws.roomId) {
+
+        send(
+          ws,
+          {
+            type: "error",
+            message:
+              "Você já está em uma sala."
+          }
+        );
+
+        return;
+      }
+
+      const room =
+        getOrCreateRoom(
+          roomId
+        );
+
+      /*
+       * Limite da sala.
+       */
+      if (
+        room.clients.size >=
+        12
+      ) {
+
+        send(
+          ws,
+          {
+            type: "error",
+            message:
+              "A sala está cheia."
+          }
+        );
+
+        return;
+      }
+
+      /*
+       * ID único do participante.
+       */
+      const peerId =
+        crypto.randomUUID();
+
+      const participant = {
+        ws,
+        peerId,
+        name,
+        mobile,
+
+        /*
+         * Todo mundo entra mutado.
+         */
+        muted: true,
+
+        /*
+         * Ninguém começa
+         * compartilhando.
+         */
+        sharing: false,
+
+        joinedAt: Date.now()
+      };
+
+      ws.roomId =
+        roomId;
+
+      ws.peerId =
+        peerId;
+
+      room.clients.add(
+        participant
+      );
+
+      /*
+       * Primeiro participante
+       * vira administrador.
+       */
+      if (
+        !room.adminPeerId
+      ) {
+
+        room.adminPeerId =
+          peerId;
+      }
+
+      /*
+       * Confirmar entrada.
+       */
+      send(
+        ws,
+        {
+          type: "joined",
+
+          peerId,
+
+          room: roomId,
+
+          admin:
+            room.adminPeerId ===
+            peerId,
+
+          participants:
+            getParticipants(
+              room
+            )
+        }
+      );
+
+      /*
+       * Avisar os outros.
+       */
+      broadcast(
+        room,
+        {
+          type:
+            "participant-joined",
+
+          participant:
+            participantData(
+              room,
+              participant
+            )
+        },
+        ws
+      );
+
+      /*
+       * Atualizar todos.
+       */
+      broadcastAll(
+        room,
+        {
+          type:
+            "participants-refresh",
+
+          participants:
+            getParticipants(
+              room
+            )
+        }
+      );
+
+      console.log(
+        `[SALA] ${roomId} - ${name} entrou (${room.clients.size}/12)`
+      );
+
+      return;
     }
+
+    /* =================================================
+       TODAS AS MENSAGENS ABAIXO
+       PRECISAM DE UMA SALA
+    ================================================= */
+
+    const room =
+      ws.roomId
+        ? getRoom(
+            ws.roomId
+          )
+        : null;
 
     if (!room) {
 
-        toast("Digite o código da sala.");
+      send(
+        ws,
+        {
+          type: "error",
+          message:
+            "Você não está em uma sala."
+        }
+      );
 
-        roomInput?.focus();
-
-        return;
+      return;
     }
 
-    localStorage.setItem(
-        "hype_name",
-        name
-    );
-
-    enterRoom(
+    const me =
+      findParticipant(
         room,
-        name
-    );
-});
+        ws.peerId
+      );
 
-roomInput?.addEventListener(
-    "keydown",
-    event => {
-
-        if (event.key === "Enter") {
-            joinBtn?.click();
-        }
-    }
-);
-
-nameHome?.addEventListener(
-    "keydown",
-    event => {
-
-        if (event.key === "Enter") {
-            createBtn?.click();
-        }
-    }
-);
-
-/* =========================================================
-   ENTRAR NA SALA
-========================================================= */
-
-function enterRoom(room, name) {
-
-    roomId = String(room)
-        .replace(/[^a-zA-Z0-9_-]/g, "")
-        .slice(0, 32);
-
-    myName = String(name)
-        .trim()
-        .slice(0, 30);
-
-    if (!roomId) {
-
-        toast("Código de sala inválido.");
-
-        return;
+    if (!me) {
+      return;
     }
 
-    updateUrl(roomId);
-
-    home?.classList.add("hidden");
-    roomPage?.classList.remove("hidden");
-
-    if (roomCodeEl) {
-        roomCodeEl.textContent = roomId;
-    }
-
-    if (roomStatus) {
-        roomStatus.textContent = "Conectando...";
-    }
-
-    connectSocket();
-}
-
-/* =========================================================
-   WEBSOCKET
-========================================================= */
-
-function websocketUrl() {
-
-    const protocol =
-        window.location.protocol === "https:"
-            ? "wss:"
-            : "ws:";
-
-    return (
-        protocol +
-        "//" +
-        window.location.host
-    );
-}
-
-function connectSocket() {
+    /* =================================================
+       WEBRTC SIGNAL
+    ================================================= */
 
     if (
-        socket &&
-        (
-            socket.readyState === WebSocket.OPEN ||
-            socket.readyState === WebSocket.CONNECTING
-        )
+      msg.type === "signal"
     ) {
-        return;
-    }
 
-    if (roomStatus) {
-        roomStatus.textContent = "Conectando...";
-    }
-
-    socket = new WebSocket(
-        websocketUrl()
-    );
-
-    socket.addEventListener(
-        "open",
-        () => {
-
-            reconnectState.attempts = 0;
-
-            if (roomStatus) {
-                roomStatus.textContent = "Conectado";
-            }
-
-            send({
-                type: "join",
-                room: roomId,
-                name: myName,
-                mobile: isMobile
-            });
-        }
-    );
-
-    socket.addEventListener(
-        "message",
-        async event => {
-
-            let message;
-
-            try {
-                message =
-                    JSON.parse(event.data);
-            } catch {
-                return;
-            }
-
-            await handleMessage(message);
-        }
-    );
-
-    socket.addEventListener(
-        "close",
-        () => {
-
-            if (roomStatus) {
-                roomStatus.textContent =
-                    "Desconectado";
-            }
-
-            scheduleReconnect();
-        }
-    );
-
-    socket.addEventListener(
-        "error",
-        () => {
-
-            if (roomStatus) {
-                roomStatus.textContent =
-                    "Erro de conexão";
-            }
-        }
-    );
-}
-
-function scheduleReconnect() {
-
-    if (reconnectState.timer) {
-        return;
-    }
-
-    reconnectState.attempts++;
-
-    const delay =
-        Math.min(
-            10000,
-            1000 * reconnectState.attempts
+      const target =
+        findParticipant(
+          room,
+          msg.to
         );
 
-    reconnectState.timer =
-        setTimeout(() => {
+      if (!target) {
+        return;
+      }
 
-            reconnectState.timer = null;
+      if (!msg.signal) {
+        return;
+      }
 
-            connectSocket();
+      send(
+        target.ws,
+        {
+          type:
+            "signal",
 
-        }, delay);
-}
+          from:
+            me.peerId,
 
-function send(message) {
+          fromName:
+            me.name,
+
+          signal:
+            msg.signal
+        }
+      );
+
+      return;
+    }
+
+    /* =================================================
+       COMPARTILHAMENTO
+    ================================================= */
 
     if (
-        !socket ||
-        socket.readyState !== WebSocket.OPEN
-    ) {
-        return false;
-    }
-
-    socket.send(
-        JSON.stringify(message)
-    );
-
-    return true;
-}
-
-/* =========================================================
-   MENSAGENS
-========================================================= */
-
-async function handleMessage(msg) {
-
-    switch (msg.type) {
-
-        case "joined":
-            await handleJoined(msg);
-            break;
-
-        case "participant-joined":
-
-            if (msg.participant) {
-                addParticipant(
-                    msg.participant
-                );
-            }
-
-            break;
-
-        case "participant-left":
-
-            removeParticipant(
-                msg.peerId
-            );
-
-            break;
-
-        case "participant-updated":
-
-            if (msg.participant) {
-                updateParticipant(
-                    msg.participant
-                );
-            }
-
-            break;
-
-        case "participants-refresh":
-
-            refreshParticipants(
-                msg.participants || []
-            );
-
-            break;
-
-        case "signal":
-
-            await handleSignal(msg);
-
-            break;
-
-        case "chat":
-
-            addChatMessage(msg);
-
-            break;
-
-        case "kicked":
-
-            toast(
-                msg.message ||
-                "Você foi removido da sala."
-            );
-
-            setTimeout(
-                leaveRoom,
-                800
-            );
-
-            break;
-
-        case "forced-mute":
-
-            setLocalMute(
-                Boolean(msg.muted)
-            );
-
-            break;
-
-        case "force-stop-share":
-
-            stopScreenShare(false);
-
-            break;
-
-        case "admin-promoted":
-
-            isAdmin = true;
-
-            updateAdminInterface();
-
-            toast(
-                "Você agora é o administrador da sala."
-            );
-
-            break;
-
-        case "error":
-
-            toast(
-                msg.message ||
-                "Ocorreu um erro."
-            );
-
-            break;
-    }
-}
-
-/* =========================================================
-   JOINED
-========================================================= */
-
-async function handleJoined(msg) {
-
-    myPeerId = msg.peerId;
-    roomId = msg.room;
-
-    isAdmin = Boolean(msg.admin);
-
-    if (roomCodeEl) {
-        roomCodeEl.textContent = roomId;
-    }
-
-    refreshParticipants(
-        msg.participants || []
-    );
-
-    updateAdminInterface();
-
-    /*
-     * Conecta com quem já estava na sala.
-     */
-
-    for (
-        const participant
-        of msg.participants || []
+      msg.type === "sharing"
     ) {
 
-        if (
-            participant.peerId ===
-            myPeerId
-        ) {
-            continue;
-        }
+      /*
+       * Celular não compartilha.
+       */
+      if (me.mobile) {
 
-        await createPeerConnection(
-            participant.peerId,
-            true
+        send(
+          ws,
+          {
+            type: "error",
+            message:
+              "Dispositivos móveis não podem compartilhar a tela."
+          }
         );
-    }
 
-    if (isMobile) {
-
-        toast(
-            "Modo espectador: no celular você pode assistir às transmissões."
-        );
-    }
-}
-
-/* =========================================================
-   PARTICIPANTES
-========================================================= */
-
-function refreshParticipants(list) {
-
-    participants.clear();
-
-    for (const participant of list) {
-
-        participants.set(
-            participant.peerId,
-            participant
-        );
-    }
-
-    renderParticipants();
-}
-
-function addParticipant(participant) {
-
-    participants.set(
-        participant.peerId,
-        participant
-    );
-
-    renderParticipants();
-}
-
-function updateParticipant(participant) {
-
-    participants.set(
-        participant.peerId,
-        participant
-    );
-
-    renderParticipants();
-}
-
-function removeParticipant(peerId) {
-
-    participants.delete(peerId);
-
-    const pc = peers.get(peerId);
-
-    if (pc) {
-
-        try {
-            pc.close();
-        } catch {}
-
-        peers.delete(peerId);
-    }
-
-    removeVideo(peerId);
-
-    renderParticipants();
-}
-
-/* =========================================================
-   PARTICIPANTES - INTERFACE
-========================================================= */
-
-function renderParticipants() {
-
-    if (!participantsEl) {
         return;
-    }
+      }
 
-    participantsEl.innerHTML = "";
+      me.sharing =
+        Boolean(
+          msg.value
+        );
 
-    for (
-        const participant
-        of participants.values()
-    ) {
+      broadcastAll(
+        room,
+        {
+          type:
+            "participant-updated",
 
-        const row =
-            document.createElement("div");
-
-        row.className = "participant";
-
-        const avatar =
-            document.createElement("div");
-
-        avatar.className = "avatar";
-
-        avatar.textContent =
-            (
-                participant.name ||
-                "?"
+          participant:
+            participantData(
+              room,
+              me
             )
-            .charAt(0)
-            .toUpperCase();
-
-        const name =
-            document.createElement("div");
-
-        name.className = "pname";
-
-        name.textContent =
-            participant.name ||
-            "Convidado";
-
-        if (participant.admin) {
-
-            const badge =
-                document.createElement("span");
-
-            badge.className =
-                "admin-badge";
-
-            badge.textContent = "ADM";
-
-            name.appendChild(badge);
         }
+      );
 
-        const device =
-            document.createElement("span");
+      return;
+    }
 
-        device.className =
-            "device-badge";
+    /* =================================================
+       MICROFONE
+    ================================================= */
 
-        device.textContent =
-            participant.mobile
-                ? "📱"
-                : "💻";
+    if (
+      msg.type === "mic"
+    ) {
 
-        const mic =
-            document.createElement("span");
+      /*
+       * Celular não utiliza
+       * microfone neste projeto.
+       */
+      if (me.mobile) {
+        return;
+      }
 
-        mic.className =
-            "mic-status";
+      me.muted =
+        Boolean(
+          msg.muted
+        );
 
-        mic.textContent =
-            participant.muted
-                ? "🔇"
-                : "🎙️";
+      broadcastAll(
+        room,
+        {
+          type:
+            "participant-updated",
 
-        if (participant.muted) {
-            mic.classList.add("muted");
+          participant:
+            participantData(
+              room,
+              me
+            )
         }
+      );
 
-        row.appendChild(avatar);
-        row.appendChild(name);
-        row.appendChild(device);
-        row.appendChild(mic);
+      return;
+    }
 
-        if (participant.sharing) {
+    /* =================================================
+       CHAT
+    ================================================= */
 
-            const dot =
-                document.createElement("span");
+    if (
+      msg.type === "chat"
+    ) {
 
-            dot.className =
-                "sharing-dot";
+      const text =
+        String(
+          msg.text || ""
+        )
+          .trim()
+          .slice(
+            0,
+            500
+          );
 
-            row.appendChild(dot);
+      if (!text) {
+        return;
+      }
+
+      broadcastAll(
+        room,
+        {
+          type: "chat",
+
+          from:
+            me.name,
+
+          peerId:
+            me.peerId,
+
+          text,
+
+          at:
+            Date.now()
         }
+      );
 
-        /*
-         * BOTÕES DO ADM
-         */
+      return;
+    }
+
+    /* =================================================
+       VERIFICAÇÃO DE ADMIN
+    ================================================= */
+
+    const adminRequest =
+      msg.type ===
+        "admin-mute" ||
+      msg.type ===
+        "admin-mute-all" ||
+      msg.type ===
+        "admin-stop-shares" ||
+      msg.type ===
+        "admin-kick";
+
+    if (
+      adminRequest &&
+      room.adminPeerId !==
+        me.peerId
+    ) {
+
+      send(
+        ws,
+        {
+          type: "error",
+          message:
+            "Somente o administrador pode fazer isso."
+        }
+      );
+
+      return;
+    }
+
+    /* =================================================
+       ADMIN - MUTAR USUÁRIO
+    ================================================= */
+
+    if (
+      msg.type ===
+      "admin-mute"
+    ) {
+
+      const target =
+        findParticipant(
+          room,
+          msg.peerId
+        );
+
+      if (!target) {
+        return;
+      }
+
+      /*
+       * O admin não pode alterar
+       * o próprio microfone por
+       * este comando.
+       */
+      if (
+        target.peerId ===
+        me.peerId
+      ) {
+        return;
+      }
+
+      target.muted =
+        Boolean(
+          msg.muted
+        );
+
+      send(
+        target.ws,
+        {
+          type:
+            "forced-mute",
+
+          muted:
+            target.muted
+        }
+      );
+
+      broadcastAll(
+        room,
+        {
+          type:
+            "participant-updated",
+
+          participant:
+            participantData(
+              room,
+              target
+            )
+        }
+      );
+
+      return;
+    }
+
+    /* =================================================
+       ADMIN - MUTAR TODOS
+    ================================================= */
+
+    if (
+      msg.type ===
+      "admin-mute-all"
+    ) {
+
+      for (
+        const participant
+        of room.clients
+      ) {
 
         if (
-            isAdmin &&
-            participant.peerId !== myPeerId
+          participant.peerId ===
+          me.peerId
         ) {
+          continue;
+        }
 
-            const actions =
-                document.createElement("div");
+        participant.muted =
+          true;
 
-            actions.className =
-                "participant-actions";
+        send(
+          participant.ws,
+          {
+            type:
+              "forced-mute",
 
-            const mute =
-                document.createElement("button");
+            muted: true
+          }
+        );
+      }
 
-            mute.type = "button";
+      broadcastAll(
+        room,
+        {
+          type:
+            "participants-refresh",
 
-            mute.className = "mini-btn";
+          participants:
+            getParticipants(
+              room
+            )
+        }
+      );
 
-            mute.title =
-                participant.muted
-                    ? "Ativar microfone"
-                    : "Silenciar";
+      return;
+    }
 
-            mute.textContent =
-                participant.muted
-                    ? "🔊"
-                    : "🔇";
+    /* =================================================
+       ADMIN - PARAR TRANSMISSÕES
+    ================================================= */
 
-            mute.addEventListener(
-                "click",
-                event => {
+    if (
+      msg.type ===
+      "admin-stop-shares"
+    ) {
 
-                    event.stopPropagation();
+      for (
+        const participant
+        of room.clients
+      ) {
 
-                    adminMuteUser(
-                        participant.peerId,
-                        !participant.muted
-                    );
-                }
+        if (
+          participant.peerId ===
+          me.peerId
+        ) {
+          continue;
+        }
+
+        participant.sharing =
+          false;
+
+        send(
+          participant.ws,
+          {
+            type:
+              "force-stop-share"
+          }
+        );
+      }
+
+      broadcastAll(
+        room,
+        {
+          type:
+            "participants-refresh",
+
+          participants:
+            getParticipants(
+              room
+            )
+        }
+      );
+
+      return;
+    }
+
+    /* =================================================
+       ADMIN - EXPULSAR
+    ================================================= */
+
+    if (
+      msg.type ===
+      "admin-kick"
+    ) {
+
+      const target =
+        findParticipant(
+          room,
+          msg.peerId
+        );
+
+      if (!target) {
+        return;
+      }
+
+      /*
+       * Não permite expulsar
+       * o próprio administrador.
+       */
+      if (
+        target.peerId ===
+        room.adminPeerId
+      ) {
+        return;
+      }
+
+      send(
+        target.ws,
+        {
+          type:
+            "kicked",
+
+          message:
+            "Você foi removido da sala pelo administrador."
+        }
+      );
+
+      setTimeout(
+        () => {
+
+          try {
+            target.ws.close(
+              4001,
+              "Kicked"
             );
+          } catch {}
+        },
+        300
+      );
 
-            const kick =
-                document.createElement("button");
-
-            kick.type = "button";
-
-            kick.className =
-                "mini-btn kick-btn";
-
-            kick.title = "Expulsar usuário";
-
-            kick.textContent = "✕";
-
-            kick.addEventListener(
-                "click",
-                event => {
-
-                    event.stopPropagation();
-
-                    adminKickUser(
-                        participant.peerId
-                    );
-                }
-            );
-
-            actions.appendChild(mute);
-            actions.appendChild(kick);
-
-            row.appendChild(actions);
-        }
-
-        participantsEl.appendChild(row);
+      return;
     }
 
-    if (countEl) {
-        countEl.textContent =
-            String(participants.size);
-    }
-}
+  }
+);
 
-/* =========================================================
-   ADMIN
-========================================================= */
+/* =====================================================
+   DESCONEXÃO
+===================================================== */
 
-function updateAdminInterface() {
+ws.on(
+  "close",
+  () => {
 
-    if (!roomPage) {
-        return;
-    }
+    const room =
+      ws.roomId
+        ? getRoom(
+            ws.roomId
+          )
+        : null;
 
-    if (isAdmin) {
-
-        roomPage.classList.add(
-            "admin-mode"
-        );
-
-        if (adminButton) {
-            adminButton.style.display =
-                "inline-flex";
-        }
-
-    } else {
-
-        roomPage.classList.remove(
-            "admin-mode"
-        );
-
-        if (adminButton) {
-            adminButton.style.display =
-                "none";
-        }
-
-        adminPanel?.classList.add(
-            "hidden"
-        );
-    }
-
-    renderParticipants();
-}
-
-window.toggleAdminPanel = function () {
-
-    if (!isAdmin) {
-
-        toast(
-            "Somente o administrador pode abrir este menu."
-        );
-
-        return;
-    }
-
-    adminPanel?.classList.toggle(
-        "hidden"
-    );
-};
-
-window.adminMuteAll = function () {
-
-    if (!isAdmin) {
-        return;
-    }
-
-    send({
-        type: "admin-mute-all"
-    });
-
-    toast(
-        "Todos os participantes foram silenciados."
-    );
-};
-
-window.adminStopShares = function () {
-
-    if (!isAdmin) {
-        return;
-    }
-
-    send({
-        type: "admin-stop-shares"
-    });
-
-    toast(
-        "Transmissões encerradas."
-    );
-};
-
-window.adminCopyInvite = function () {
-    copyInvite();
-};
-
-function adminMuteUser(peerId, muted) {
-
-    if (!isAdmin) {
-        return;
-    }
-
-    send({
-        type: "admin-mute",
-        peerId,
-        muted
-    });
-}
-
-function adminKickUser(peerId) {
-
-    if (!isAdmin) {
-        return;
+    if (!room) {
+      return;
     }
 
     const participant =
-        participants.get(peerId);
+      findParticipant(
+        room,
+        ws.peerId
+      );
 
     if (!participant) {
-        return;
+      return;
     }
 
-    const confirmed =
-        confirm(
-            `Expulsar ${participant.name} da sala?`
-        );
+    const wasAdmin =
+      participant.peerId ===
+      room.adminPeerId;
 
-    if (!confirmed) {
-        return;
-    }
+    room.clients.delete(
+      participant
+    );
 
-    send({
-        type: "admin-kick",
-        peerId
-    });
-}
-
-/* =========================================================
-   WEBRTC
-========================================================= */
-
-function createPeerConnection(
-    peerId,
-    initiator
-) {
-
-    if (peers.has(peerId)) {
-        return peers.get(peerId);
-    }
-
-    const pc =
-        new RTCPeerConnection({
-            iceServers: [
-                {
-                    urls:
-                        "stun:stun.l.google.com:19302"
-                },
-                {
-                    urls:
-                        "stun:stun1.l.google.com:19302"
-                }
-            ]
-        });
-
-    peers.set(peerId, pc);
+    console.log(
+      `[SALA] ${room.id} - ${participant.name} saiu (${room.clients.size}/12)`
+    );
 
     /*
-     * Microfone
+     * Avisar que saiu.
      */
+    broadcastAll(
+      room,
+      {
+        type:
+          "participant-left",
 
-    if (localMicStream) {
+        peerId:
+          participant.peerId
+      }
+    );
 
-        for (
-            const track
-            of localMicStream.getTracks()
-        ) {
+    /*
+     * Se o administrador saiu,
+     * escolher outro.
+     */
+    if (
+      wasAdmin &&
+      room.clients.size > 0
+    ) {
 
-            pc.addTrack(
-                track,
-                localMicStream
-            );
+      const newAdmin =
+        Array.from(
+          room.clients
+        )[0];
+
+      room.adminPeerId =
+        newAdmin.peerId;
+
+      send(
+        newAdmin.ws,
+        {
+          type:
+            "admin-promoted"
         }
+      );
+
+      console.log(
+        `[SALA] ${room.id} - novo administrador: ${newAdmin.name}`
+      );
     }
 
     /*
-     * Tela
+     * Atualizar todos.
      */
+    if (
+      room.clients.size > 0
+    ) {
 
-    if (localScreenStream) {
+      broadcastAll(
+        room,
+        {
+          type:
+            "participants-refresh",
 
-        for (
-            const track
-            of localScreenStream.getTracks()
-        ) {
-
-            pc.addTrack(
-                track,
-                localScreenStream
-            );
+          participants:
+            getParticipants(
+              room
+            )
         }
-    }
-
-    pc.onicecandidate = event => {
-
-        if (!event.candidate) {
-            return;
-        }
-
-        send({
-            type: "signal",
-            to: peerId,
-            signal: {
-                type: "candidate",
-                candidate: event.candidate
-            }
-        });
-    };
-
-    pc.ontrack = event => {
-
-        let stream =
-            event.streams[0];
-
-        /*
-         * Alguns navegadores podem não enviar
-         * o stream diretamente.
-         */
-
-        if (!stream) {
-
-            stream =
-                new MediaStream();
-
-            stream.addTrack(
-                event.track
-            );
-        }
-
-        showRemoteVideo(
-            peerId,
-            stream
-        );
-    };
-
-    pc.onconnectionstatechange = () => {
-
-        if (
-            pc.connectionState ===
-            "failed"
-        ) {
-
-            try {
-                pc.restartIce();
-            } catch {}
-        }
-
-        if (
-            pc.connectionState ===
-                "closed"
-        ) {
-
-            removeVideo(peerId);
-        }
-    };
-
-    if (initiator) {
-
-        makeOffer(
-            peerId,
-            pc
-        );
-    }
-
-    return pc;
-}
-
-/* =========================================================
-   OFERTA
-========================================================= */
-
-async function makeOffer(
-    peerId,
-    pc
-) {
-
-    try {
-
-        const offer =
-            await pc.createOffer();
-
-        await pc.setLocalDescription(
-            offer
-        );
-
-        send({
-            type: "signal",
-            to: peerId,
-            signal: {
-                type: "offer",
-                sdp: pc.localDescription
-            }
-        });
-
-    } catch (error) {
-
-        console.error(
-            "Erro ao criar oferta:",
-            error
-        );
-    }
-}
-
-/* =========================================================
-   SIGNAL
-========================================================= */
-
-async function handleSignal(msg) {
-
-    const peerId = msg.from;
-
-    let pc =
-        peers.get(peerId);
-
-    if (!pc) {
-
-        pc =
-            createPeerConnection(
-                peerId,
-                false
-            );
-    }
-
-    const signal = msg.signal;
-
-    if (!signal) {
-        return;
-    }
-
-    try {
-
-        if (signal.type === "offer") {
-
-            /*
-             * Evita problemas de negociação
-             */
-
-            await pc.setRemoteDescription(
-                new RTCSessionDescription(
-                    signal.sdp
-                )
-            );
-
-            const answer =
-                await pc.createAnswer();
-
-            await pc.setLocalDescription(
-                answer
-            );
-
-            send({
-                type: "signal",
-                to: peerId,
-                signal: {
-                    type: "answer",
-                    sdp: pc.localDescription
-                }
-            });
-        }
-
-        else if (
-            signal.type === "answer"
-        ) {
-
-            await pc.setRemoteDescription(
-                new RTCSessionDescription(
-                    signal.sdp
-                )
-            );
-        }
-
-        else if (
-            signal.type === "candidate"
-        ) {
-
-            if (
-                signal.candidate
-            ) {
-
-                try {
-
-                    await pc.addIceCandidate(
-                        new RTCIceCandidate(
-                            signal.candidate
-                        )
-                    );
-
-                } catch (error) {
-
-                    console.warn(
-                        "ICE candidate:",
-                        error
-                    );
-                }
-            }
-        }
-
-    } catch (error) {
-
-        console.error(
-            "Erro WebRTC:",
-            error
-        );
-    }
-}
-
-/* =========================================================
-   VÍDEO REMOTO
-========================================================= */
-
-function showRemoteVideo(
-    peerId,
-    stream
-) {
-
-    let card =
-        document.getElementById(
-            `video-${peerId}`
-        );
-
-    let video;
-
-    if (!card) {
-
-        card =
-            document.createElement("div");
-
-        card.className =
-            "video-card";
-
-        card.id =
-            `video-${peerId}`;
-
-        video =
-            document.createElement("video");
-
-        video.autoplay = true;
-        video.playsInline = true;
-        video.controls = false;
-        video.muted = false;
-        video.volume = 1;
-
-        card.appendChild(video);
-
-        const name =
-            document.createElement("div");
-
-        name.className =
-            "video-name";
-
-        const participant =
-            participants.get(peerId);
-
-        name.textContent =
-            participant?.name ||
-            "Participante";
-
-        card.appendChild(name);
-
-        videos?.appendChild(card);
-
-        /*
-         * Clique libera áudio em navegadores
-         * que bloqueiam autoplay.
-         */
-
-        card.addEventListener(
-            "click",
-            () => {
-
-                video.muted = false;
-                video.volume = 1;
-
-                video.play()
-                    .catch(() => {});
-            }
-        );
+      );
 
     } else {
 
-        video =
-            card.querySelector("video");
+      removeEmptyRoom(
+        room
+      );
+
+      console.log(
+        `[SALA] ${room.id} removida`
+      );
     }
 
-    if (!video) {
-        return;
-    }
+    ws.roomId = null;
+    ws.peerId = null;
+  }
+);
+
+/* =====================================================
+   ERRO DO SOCKET
+===================================================== */
+
+ws.on(
+  "error",
+  error => {
+
+    console.error(
+      "WebSocket error:",
+      error.message
+    );
+  }
+);
+```
+
+}
+);
+
+/* =========================================================
+PING / PONG
+========================================================= */
+
+const heartbeatInterval =
+setInterval(
+() => {
+
+```
+  for (
+    const ws
+    of wss.clients
+  ) {
 
     if (
-        video.srcObject !== stream
+      ws.isAlive === false
     ) {
 
-        video.srcObject = stream;
+      try {
+        ws.terminate();
+      } catch {}
+
+      continue;
     }
 
-    video.play()
-        .catch(() => {
-
-            card.classList.add(
-                "audio-locked"
-            );
-        });
-
-    emptyState?.classList.add(
-        "hidden"
-    );
-}
-
-/* =========================================================
-   REMOVER VÍDEO
-========================================================= */
-
-function removeVideo(peerId) {
-
-    const card =
-        document.getElementById(
-            `video-${peerId}`
-        );
-
-    if (card) {
-        card.remove();
-    }
-
-    if (
-        videos &&
-        videos.children.length === 0
-    ) {
-
-        emptyState?.classList.remove(
-            "hidden"
-        );
-    }
-}
-
-/* =========================================================
-   COMPARTILHAR TELA
-========================================================= */
-
-async function startScreenShare() {
-
-    if (isMobile) {
-
-        toast(
-            "No Android/iPhone você pode apenas assistir."
-        );
-
-        return;
-    }
-
-    if (localScreenStream) {
-
-        toast(
-            "Você já está compartilhando."
-        );
-
-        return;
-    }
-
-    if (
-        !navigator.mediaDevices ||
-        !navigator.mediaDevices.getDisplayMedia
-    ) {
-
-        toast(
-            "Seu navegador não suporta compartilhamento de tela."
-        );
-
-        return;
-    }
+    ws.isAlive =
+      false;
 
     try {
+      ws.ping();
+    } catch {}
+  }
 
-        const stream =
-            await navigator.mediaDevices.getDisplayMedia({
-                video: {
-                    frameRate: {
-                        ideal: 30,
-                        max: 60
-                    }
-                },
-                audio: true
-            });
+},
+30000
+```
 
-        localScreenStream = stream;
-
-        const videoTrack =
-            stream.getVideoTracks()[0];
-
-        if (videoTrack) {
-
-            videoTrack.addEventListener(
-                "ended",
-                () => {
-                    stopScreenShare(true);
-                }
-            );
-        }
-
-        /*
-         * Adiciona a tela aos peers
-         */
-
-        for (
-            const [
-                peerId,
-                pc
-            ]
-            of peers
-        ) {
-
-            /*
-             * Evita adicionar a mesma track
-             * duas vezes.
-             */
-
-            const existingSenders =
-                pc.getSenders();
-
-            for (
-                const track
-                of stream.getTracks()
-            ) {
-
-                const alreadyAdded =
-                    existingSenders.some(
-                        sender =>
-                            sender.track === track
-                    );
-
-                if (!alreadyAdded) {
-
-                    pc.addTrack(
-                        track,
-                        stream
-                    );
-                }
-            }
-
-            await renegotiate(
-                peerId,
-                pc
-            );
-        }
-
-        send({
-            type: "sharing",
-            value: true
-        });
-
-        shareBtn?.classList.add(
-            "hidden"
-        );
-
-        shareCenterBtn?.classList.add(
-            "hidden"
-        );
-
-        stopShareBtn?.classList.remove(
-            "hidden"
-        );
-
-        toast(
-            "Transmissão iniciada."
-        );
-
-    } catch (error) {
-
-        console.error(
-            "Compartilhamento:",
-            error
-        );
-
-        if (
-            error.name ===
-            "NotAllowedError"
-        ) {
-
-            toast(
-                "Você cancelou o compartilhamento."
-            );
-
-        } else {
-
-            toast(
-                "Não foi possível compartilhar a tela."
-            );
-        }
-    }
-}
-
-/* =========================================================
-   RENEGOCIAÇÃO
-========================================================= */
-
-async function renegotiate(
-    peerId,
-    pc
-) {
-
-    try {
-
-        const offer =
-            await pc.createOffer();
-
-        await pc.setLocalDescription(
-            offer
-        );
-
-        send({
-            type: "signal",
-            to: peerId,
-            signal: {
-                type: "offer",
-                sdp: pc.localDescription
-            }
-        });
-
-    } catch (error) {
-
-        console.error(
-            "Renegociação:",
-            error
-        );
-    }
-}
-
-/* =========================================================
-   PARAR TELA
-========================================================= */
-
-function stopScreenShare(
-    notifyServer = true
-) {
-
-    if (localScreenStream) {
-
-        for (
-            const track
-            of localScreenStream.getTracks()
-        ) {
-
-            try {
-                track.stop();
-            } catch {}
-        }
-
-        localScreenStream = null;
-    }
-
-    /*
-     * Remove somente os tracks de vídeo
-     * que pertencem à tela.
-     */
-
-    for (
-        const [
-            peerId,
-            pc
-        ]
-        of peers
-    ) {
-
-        const senders =
-            pc.getSenders();
-
-        for (
-            const sender
-            of senders
-        ) {
-
-            const track =
-                sender.track;
-
-            if (
-                track &&
-                track.kind === "video"
-            ) {
-
-                try {
-                    pc.removeTrack(sender);
-                } catch {}
-            }
-        }
-
-        /*
-         * Renegocia para informar que a tela parou.
-         */
-
-        renegotiate(
-            peerId,
-            pc
-        );
-    }
-
-    if (notifyServer) {
-
-        send({
-            type: "sharing",
-            value: false
-        });
-    }
-
-    shareBtn?.classList.remove(
-        "hidden"
-    );
-
-    shareCenterBtn?.classList.remove(
-        "hidden"
-    );
-
-    stopShareBtn?.classList.add(
-        "hidden"
-    );
-
-    toast(
-        "Transmissão encerrada."
-    );
-}
-
-/* =========================================================
-   MICROFONE
-========================================================= */
-
-async function toggleMicrophone() {
-
-    if (isMobile) {
-
-        toast(
-            "No celular o microfone está desativado."
-        );
-
-        return;
-    }
-
-    try {
-
-        /*
-         * Primeiro clique
-         */
-
-        if (!localMicStream) {
-
-            localMicStream =
-                await navigator.mediaDevices.getUserMedia({
-                    audio: true,
-                    video: false
-                });
-
-            micEnabled = true;
-
-            /*
-             * Adiciona aos peers.
-             */
-
-            for (
-                const [
-                    peerId,
-                    pc
-                ]
-                of peers
-            ) {
-
-                for (
-                    const track
-                    of localMicStream.getTracks()
-                ) {
-
-                    pc.addTrack(
-                        track,
-                        localMicStream
-                    );
-                }
-
-                await renegotiate(
-                    peerId,
-                    pc
-                );
-            }
-
-        } else {
-
-            micEnabled =
-                !micEnabled;
-
-            for (
-                const track
-                of localMicStream.getAudioTracks()
-            ) {
-
-                track.enabled =
-                    micEnabled;
-            }
-        }
-
-        updateMicButton();
-
-        send({
-            type: "mic",
-            muted: !micEnabled
-        });
-
-    } catch (error) {
-
-        console.error(
-            "Microfone:",
-            error
-        );
-
-        toast(
-            "Não foi possível acessar o microfone."
-        );
-    }
-}
-
-/* =========================================================
-   MUTE FORÇADO
-========================================================= */
-
-function setLocalMute(muted) {
-
-    if (!localMicStream) {
-
-        micEnabled = !muted;
-
-        updateMicButton();
-
-        return;
-    }
-
-    for (
-        const track
-        of localMicStream.getAudioTracks()
-    ) {
-
-        track.enabled = !muted;
-    }
-
-    micEnabled = !muted;
-
-    updateMicButton();
-
-    toast(
-        muted
-            ? "Seu microfone foi silenciado pelo administrador."
-            : "Seu microfone foi ativado."
-    );
-}
-
-/* =========================================================
-   BOTÃO MICROFONE
-========================================================= */
-
-function updateMicButton() {
-
-    if (!micBtn) {
-        return;
-    }
-
-    if (micEnabled) {
-
-        micBtn.innerHTML =
-            "<span>🎙️</span> Microfone ligado";
-
-    } else {
-
-        micBtn.innerHTML =
-            "<span>🔇</span> Microfone desligado";
-    }
-}
-
-/* =========================================================
-   CHAT
-========================================================= */
-
-chatForm?.addEventListener(
-    "submit",
-    event => {
-
-        event.preventDefault();
-
-        const text =
-            chatInput?.value.trim();
-
-        if (!text) {
-            return;
-        }
-
-        send({
-            type: "chat",
-            text
-        });
-
-        chatInput.value = "";
-    }
-);
-
-function addChatMessage(message) {
-
-    if (!chatMessages) {
-        return;
-    }
-
-    const item =
-        document.createElement("div");
-
-    item.className = "message";
-
-    const meta =
-        document.createElement("div");
-
-    meta.className = "meta";
-
-    meta.textContent =
-        message.from ||
-        "Convidado";
-
-    const text =
-        document.createElement("div");
-
-    text.className = "text";
-
-    text.textContent =
-        message.text || "";
-
-    item.appendChild(meta);
-    item.appendChild(text);
-
-    chatMessages.appendChild(item);
-
-    chatMessages.scrollTop =
-        chatMessages.scrollHeight;
-}
-
-/* =========================================================
-   CONVITE
-========================================================= */
-
-function getInviteUrl() {
-
-    const url =
-        new URL(
-            window.location.href
-        );
-
-    url.searchParams.set(
-        "room",
-        roomId
-    );
-
-    return url.toString();
-}
-
-async function copyInvite() {
-
-    const invite =
-        getInviteUrl();
-
-    try {
-
-        await navigator.clipboard.writeText(
-            invite
-        );
-
-        toast(
-            "Convite copiado!"
-        );
-
-    } catch {
-
-        const textarea =
-            document.createElement(
-                "textarea"
-            );
-
-        textarea.value = invite;
-
-        document.body.appendChild(
-            textarea
-        );
-
-        textarea.select();
-
-        document.execCommand(
-            "copy"
-        );
-
-        textarea.remove();
-
-        toast(
-            "Convite copiado!"
-        );
-    }
-}
-
-copyBtn?.addEventListener(
-    "click",
-    copyInvite
-);
-
-inviteBtn?.addEventListener(
-    "click",
-    copyInvite
 );
 
 /* =========================================================
-   SAIR
+ENCERRAMENTO
 ========================================================= */
 
-leaveBtn?.addEventListener(
-    "click",
-    leaveRoom
+wss.on(
+"close",
+() => {
+
+```
+clearInterval(
+  heartbeatInterval
 );
+```
 
-function leaveRoom() {
-
-    stopScreenShare(false);
-
-    if (localMicStream) {
-
-        for (
-            const track
-            of localMicStream.getTracks()
-        ) {
-
-            try {
-                track.stop();
-            } catch {}
-        }
-
-        localMicStream = null;
-    }
-
-    for (
-        const pc
-        of peers.values()
-    ) {
-
-        try {
-            pc.close();
-        } catch {}
-    }
-
-    peers.clear();
-
-    if (socket) {
-
-        try {
-            socket.close();
-        } catch {}
-
-        socket = null;
-    }
-
-    participants.clear();
-
-    if (videos) {
-        videos.innerHTML = "";
-    }
-
-    roomPage?.classList.add(
-        "hidden"
-    );
-
-    home?.classList.remove(
-        "hidden"
-    );
-
-    const url =
-        new URL(
-            window.location.href
-        );
-
-    url.searchParams.delete(
-        "room"
-    );
-
-    history.replaceState(
-        {},
-        "",
-        url
-    );
-
-    roomId = "";
-    myPeerId = "";
-    isAdmin = false;
-
-    updateAdminInterface();
 }
-
-/* =========================================================
-   BOTÕES
-========================================================= */
-
-shareBtn?.addEventListener(
-    "click",
-    startScreenShare
-);
-
-shareCenterBtn?.addEventListener(
-    "click",
-    startScreenShare
-);
-
-stopShareBtn?.addEventListener(
-    "click",
-    () => {
-        stopScreenShare(true);
-    }
-);
-
-micBtn?.addEventListener(
-    "click",
-    toggleMicrophone
 );
 
 /* =========================================================
-   MOBILE
+SERVIDOR
 ========================================================= */
 
-function configureMobile() {
+server.on(
+"error",
+error => {
 
-    if (!isMobile) {
-        return;
-    }
+```
+console.error(
+  "Erro no servidor:",
+  error
+);
+```
 
-    shareBtn?.classList.add(
-        "hidden"
-    );
-
-    shareCenterBtn?.classList.add(
-        "hidden"
-    );
-
-    stopShareBtn?.classList.add(
-        "hidden"
-    );
-
-    micBtn?.classList.add(
-        "hidden"
-    );
 }
-
-configureMobile();
-
-/* =========================================================
-   INICIALIZAÇÃO
-========================================================= */
-
-window.addEventListener(
-    "load",
-    () => {
-
-        const savedName =
-            localStorage.getItem(
-                "hype_name"
-            );
-
-        if (
-            savedName &&
-            nameHome
-        ) {
-            nameHome.value =
-                savedName;
-        }
-
-        const room =
-            getRoomFromUrl();
-
-        if (
-            room &&
-            savedName
-        ) {
-
-            enterRoom(
-                room,
-                savedName
-            );
-        }
-    }
 );
 
-/* =========================================================
-   SALVAR NOME
-========================================================= */
+server.listen(
+PORT,
+"0.0.0.0",
+() => {
 
-nameHome?.addEventListener(
-    "change",
-    () => {
-
-        const name =
-            nameHome.value.trim();
-
-        if (name) {
-
-            localStorage.setItem(
-                "hype_name",
-                name
-            );
-        }
-    }
+```
+console.log(
+  "========================================"
 );
 
-/* =========================================================
-   SEGURANÇA
-========================================================= */
-
-window.addEventListener(
-    "beforeunload",
-    () => {
-
-        if (socket) {
-
-            try {
-                socket.close();
-            } catch {}
-        }
-    }
+console.log(
+  "HYPE ROLEPLAY"
 );
 
-/* =========================================================
-   FIM
-========================================================= */
+console.log(
+  "Servidor iniciado com sucesso."
+);
+
+console.log(
+  `Porta: ${PORT}`
+);
+
+console.log(
+  "WebSocket: ativo"
+);
+
+console.log(
+  "Salas: sistema ativo"
+);
+
+console.log(
+  "========================================"
+);
+```
+
+}
+);
