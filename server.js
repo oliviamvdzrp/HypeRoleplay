@@ -10,22 +10,33 @@ const wss = new WebSocketServer({ server });
 
 const PORT = process.env.PORT || 10000;
 
+/* =========================================================
+   ARQUIVOS DO SITE
+========================================================= */
+
 app.use(express.static(path.join(__dirname, "public")));
+
+/* =========================================================
+   HEALTH CHECK
+========================================================= */
 
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
     service: "Hype Roleplay",
     time: new Date().toISOString()
-
+  });
 });
+
+/* =========================================================
+   SPA / INDEX
+========================================================= */
+
 app.use((req, res) => {
   res.sendFile(
     path.join(__dirname, "public", "index.html")
   );
 });
-
-
 
 /* =========================================================
    SALAS
@@ -92,16 +103,9 @@ function isAdmin(room, ws) {
   return room.adminPeerId === ws.peerId;
 }
 
-function participantData(participant) {
-  return {
-    peerId: participant.peerId,
-    name: participant.name,
-    mobile: participant.mobile,
-    sharing: participant.sharing,
-    muted: participant.muted,
-    admin: participant.peerId === participant.roomAdmin
-  };
-}
+/* =========================================================
+   LISTA DE PARTICIPANTES
+========================================================= */
 
 function participantsList(room) {
   return [...room.clients].map(participant => ({
@@ -110,7 +114,8 @@ function participantsList(room) {
     mobile: participant.mobile,
     sharing: participant.sharing,
     muted: participant.muted,
-    admin: participant.peerId === room.adminPeerId
+    admin:
+      participant.peerId === room.adminPeerId
   }));
 }
 
@@ -125,6 +130,10 @@ wss.on("connection", ws => {
   ws.on("pong", () => {
     ws.isAlive = true;
   });
+
+  /* =======================================================
+     MENSAGENS
+  ======================================================= */
 
   ws.on("message", raw => {
 
@@ -146,13 +155,16 @@ wss.on("connection", ws => {
         .replace(/[^a-zA-Z0-9_-]/g, "")
         .slice(0, 32);
 
-      const name = String(msg.name || "Convidado")
+      const name = String(
+        msg.name || "Convidado"
+      )
         .trim()
         .slice(0, 30) || "Convidado";
 
       const mobile = Boolean(msg.mobile);
 
       if (!roomId) {
+
         send(ws, {
           type: "error",
           message: "Sala inválida."
@@ -164,9 +176,11 @@ wss.on("connection", ws => {
       const room = getRoom(roomId);
 
       if (room.clients.size >= 12) {
+
         send(ws, {
           type: "error",
-          message: "Esta sala atingiu o limite de 12 participantes."
+          message:
+            "Esta sala atingiu o limite de 12 participantes."
         });
 
         return;
@@ -188,10 +202,9 @@ wss.on("connection", ws => {
       ws.name = name;
       ws.mobile = mobile;
 
-      /*
-       * O primeiro usuário que entrar
-       * será o administrador.
-       */
+      /* ===================================================
+         PRIMEIRO USUÁRIO = ADMIN
+      =================================================== */
 
       if (!room.adminPeerId) {
         room.adminPeerId = peerId;
@@ -199,13 +212,23 @@ wss.on("connection", ws => {
 
       room.clients.add(participant);
 
+      /* ===================================================
+         CONFIRMAÇÃO DE ENTRADA
+      =================================================== */
+
       send(ws, {
         type: "joined",
         peerId,
         room: roomId,
-        admin: room.adminPeerId === peerId,
-        participants: participantsList(room)
+        admin:
+          room.adminPeerId === peerId,
+        participants:
+          participantsList(room)
       });
+
+      /* ===================================================
+         AVISA OS OUTROS
+      =================================================== */
 
       broadcast(
         room,
@@ -217,27 +240,28 @@ wss.on("connection", ws => {
             mobile,
             sharing: false,
             muted: false,
-            admin: room.adminPeerId === peerId
+            admin:
+              room.adminPeerId === peerId
           }
         },
         ws
       );
 
-      /*
-       * Atualiza todos porque o primeiro usuário
-       * virou administrador.
-       */
+      /* ===================================================
+         ATUALIZA PARTICIPANTES
+      =================================================== */
 
       broadcastAll(room, {
         type: "participants-refresh",
-        participants: participantsList(room)
+        participants:
+          participantsList(room)
       });
 
       return;
     }
 
     /* =====================================================
-       SALA
+       LOCALIZAR SALA
     ===================================================== */
 
     const room = ws.roomId
@@ -258,7 +282,7 @@ wss.on("connection", ws => {
     }
 
     /* =====================================================
-       SIGNAL WEBRTC
+       WEBRTC SIGNAL
     ===================================================== */
 
     if (msg.type === "signal") {
@@ -288,15 +312,14 @@ wss.on("connection", ws => {
 
     if (msg.type === "sharing") {
 
-      /*
-       * Celular não pode transmitir.
-       */
+      /* Celular não transmite */
 
       if (me.mobile) {
         return;
       }
 
-      me.sharing = Boolean(msg.value);
+      me.sharing =
+        Boolean(msg.value);
 
       broadcastAll(room, {
         type: "participant-updated",
@@ -306,7 +329,9 @@ wss.on("connection", ws => {
           mobile: me.mobile,
           sharing: me.sharing,
           muted: me.muted,
-          admin: me.peerId === room.adminPeerId
+          admin:
+            me.peerId ===
+            room.adminPeerId
         }
       });
 
@@ -319,7 +344,8 @@ wss.on("connection", ws => {
 
     if (msg.type === "mic") {
 
-      me.muted = Boolean(msg.muted);
+      me.muted =
+        Boolean(msg.muted);
 
       broadcastAll(room, {
         type: "participant-updated",
@@ -329,7 +355,9 @@ wss.on("connection", ws => {
           mobile: me.mobile,
           sharing: me.sharing,
           muted: me.muted,
-          admin: me.peerId === room.adminPeerId
+          admin:
+            me.peerId ===
+            room.adminPeerId
         }
       });
 
@@ -342,7 +370,9 @@ wss.on("connection", ws => {
 
     if (msg.type === "chat") {
 
-      const text = String(msg.text || "")
+      const text = String(
+        msg.text || ""
+      )
         .trim()
         .slice(0, 500);
 
@@ -368,24 +398,28 @@ wss.on("connection", ws => {
     if (msg.type === "admin-mute") {
 
       if (!isAdmin(room, ws)) {
+
         send(ws, {
           type: "error",
-          message: "Somente o administrador pode fazer isso."
+          message:
+            "Somente o administrador pode fazer isso."
         });
 
         return;
       }
 
-      const target = getParticipant(
-        room,
-        msg.peerId
-      );
+      const target =
+        getParticipant(
+          room,
+          msg.peerId
+        );
 
       if (!target) {
         return;
       }
 
-      target.muted = Boolean(msg.muted);
+      target.muted =
+        Boolean(msg.muted);
 
       send(target.ws, {
         type: "forced-mute",
@@ -400,7 +434,9 @@ wss.on("connection", ws => {
           mobile: target.mobile,
           sharing: target.sharing,
           muted: target.muted,
-          admin: target.peerId === room.adminPeerId
+          admin:
+            target.peerId ===
+            room.adminPeerId
         }
       });
 
@@ -419,7 +455,10 @@ wss.on("connection", ws => {
 
       for (const participant of room.clients) {
 
-        if (participant.peerId === room.adminPeerId) {
+        if (
+          participant.peerId ===
+          room.adminPeerId
+        ) {
           continue;
         }
 
@@ -433,14 +472,15 @@ wss.on("connection", ws => {
 
       broadcastAll(room, {
         type: "participants-refresh",
-        participants: participantsList(room)
+        participants:
+          participantsList(room)
       });
 
       return;
     }
 
     /* =====================================================
-       ADMIN - PARAR TODAS AS TELAS
+       ADMIN - PARAR COMPARTILHAMENTOS
     ===================================================== */
 
     if (msg.type === "admin-stop-shares") {
@@ -451,7 +491,10 @@ wss.on("connection", ws => {
 
       for (const participant of room.clients) {
 
-        if (participant.peerId === room.adminPeerId) {
+        if (
+          participant.peerId ===
+          room.adminPeerId
+        ) {
           continue;
         }
 
@@ -464,7 +507,8 @@ wss.on("connection", ws => {
 
       broadcastAll(room, {
         type: "participants-refresh",
-        participants: participantsList(room)
+        participants:
+          participantsList(room)
       });
 
       return;
@@ -480,18 +524,17 @@ wss.on("connection", ws => {
         return;
       }
 
-      const target = getParticipant(
-        room,
-        msg.peerId
-      );
+      const target =
+        getParticipant(
+          room,
+          msg.peerId
+        );
 
       if (!target) {
         return;
       }
 
-      /*
-       * O administrador não pode expulsar a si mesmo.
-       */
+      /* ADM não pode expulsar ele mesmo */
 
       if (
         target.peerId ===
@@ -502,18 +545,17 @@ wss.on("connection", ws => {
 
       send(target.ws, {
         type: "kicked",
-        message: "Você foi removido da sala pelo administrador."
+        message:
+          "Você foi removido da sala pelo administrador."
       });
-
-      /*
-       * Espera um pequeno tempo para a mensagem
-       * chegar antes de fechar.
-       */
 
       setTimeout(() => {
 
         try {
-          target.ws.close(4001, "Kicked");
+          target.ws.close(
+            4001,
+            "Kicked"
+          );
         } catch {}
 
       }, 300);
@@ -547,7 +589,8 @@ wss.on("connection", ws => {
     }
 
     const wasAdmin =
-      room.adminPeerId === me.peerId;
+      room.adminPeerId ===
+      me.peerId;
 
     room.clients.delete(me);
 
@@ -556,10 +599,9 @@ wss.on("connection", ws => {
       peerId: me.peerId
     });
 
-    /*
-     * Se o ADM sair, escolhe automaticamente
-     * outro participante como administrador.
-     */
+    /* =====================================================
+       ESCOLHER NOVO ADMIN
+    ===================================================== */
 
     if (
       wasAdmin &&
@@ -578,7 +620,8 @@ wss.on("connection", ws => {
 
       broadcastAll(room, {
         type: "participants-refresh",
-        participants: participantsList(room)
+        participants:
+          participantsList(room)
       });
     }
 
