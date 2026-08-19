@@ -1,17 +1,14 @@
-```javascript
 /* =========================================================
    HYPE ROLEPLAY
-   Compartilhamento de tela - WebRTC
-   app.js
+   COMPARTILHAMENTO DE TELA - WEBRTC
+   APP.JS COMPLETO
 ========================================================= */
 
-"use strict";
+const $ = (id) => document.getElementById(id);
 
 /* =========================================================
    ELEMENTOS
 ========================================================= */
-
-const $ = (id) => document.getElementById(id);
 
 const home = $("home");
 const roomPage = $("room");
@@ -50,7 +47,6 @@ const toastEl = $("toast");
 const adminPanel = $("adminPanel");
 const adminButton = $("adminButton");
 
-
 /* =========================================================
    ESTADO
 ========================================================= */
@@ -79,7 +75,6 @@ const reconnectState = {
 
 let toastTimer = null;
 
-
 /* =========================================================
    MOBILE
 ========================================================= */
@@ -92,14 +87,13 @@ function detectMobile() {
 
 isMobile = detectMobile();
 
-
 /* =========================================================
    TOAST
 ========================================================= */
 
 function toast(message) {
   if (!toastEl) {
-    alert(message);
+    console.log(message);
     return;
   }
 
@@ -113,34 +107,25 @@ function toast(message) {
   }, 3000);
 }
 
-
 /* =========================================================
    URL
 ========================================================= */
 
 function getRoomFromUrl() {
-  try {
-    const url = new URL(window.location.href);
+  const url = new URL(window.location.href);
 
-    return (
-      url.searchParams.get("room") || ""
-    ).trim();
-  } catch {
-    return "";
-  }
+  return (
+    url.searchParams.get("room") || ""
+  ).trim();
 }
-
 
 function updateUrl(room) {
-  try {
-    const url = new URL(window.location.href);
+  const url = new URL(window.location.href);
 
-    url.searchParams.set("room", room);
+  url.searchParams.set("room", room);
 
-    history.replaceState({}, "", url);
-  } catch {}
+  history.replaceState({}, "", url);
 }
-
 
 /* =========================================================
    GERAR SALA
@@ -154,65 +139,64 @@ function generateRoom() {
 
   for (let i = 0; i < 6; i++) {
     result += chars[
-      Math.floor(
-        Math.random() * chars.length
-      )
+      Math.floor(Math.random() * chars.length)
     ];
   }
 
   return result;
 }
 
-
 /* =========================================================
    CRIAR SALA
 ========================================================= */
 
 createBtn?.addEventListener("click", () => {
-  const name = nameHome?.value.trim();
+  const name = nameHome.value.trim();
 
   if (!name) {
     toast("Digite seu nome primeiro.");
-    nameHome?.focus();
+    nameHome.focus();
     return;
   }
 
-  saveName(name);
+  saveName();
 
   const room = generateRoom();
 
   enterRoom(room, name);
 });
 
-
 /* =========================================================
-   ENTRAR NA SALA
+   ENTRAR
 ========================================================= */
 
 joinBtn?.addEventListener("click", () => {
-  const name = nameHome?.value.trim();
+  const name = nameHome.value.trim();
 
-  const room = roomInput?.value
+  const room = roomInput.value
     .trim()
     .toUpperCase();
 
   if (!name) {
     toast("Digite seu nome primeiro.");
-    nameHome?.focus();
+    nameHome.focus();
     return;
   }
 
   if (!room) {
     toast("Digite o código da sala.");
-    roomInput?.focus();
+    roomInput.focus();
     return;
   }
 
-  saveName(name);
+  saveName();
 
   enterRoom(room, name);
 });
 
+/* =========================================================
+   ENTER
+========================================================= */
 
 roomInput?.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
@@ -220,36 +204,11 @@ roomInput?.addEventListener("keydown", (event) => {
   }
 });
 
-
 nameHome?.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     createBtn?.click();
   }
 });
-
-
-/* =========================================================
-   SALVAR NOME
-========================================================= */
-
-function saveName(name) {
-  try {
-    localStorage.setItem(
-      "hype_name",
-      name
-    );
-  } catch {}
-}
-
-
-nameHome?.addEventListener("change", () => {
-  const name = nameHome.value.trim();
-
-  if (name) {
-    saveName(name);
-  }
-});
-
 
 /* =========================================================
    ENTRAR NA SALA
@@ -261,10 +220,16 @@ function enterRoom(room, name) {
     .slice(0, 32);
 
   myName = name
+    .trim()
     .slice(0, 30);
 
   if (!roomId) {
     toast("Código de sala inválido.");
+    return;
+  }
+
+  if (!myName) {
+    toast("Nome inválido.");
     return;
   }
 
@@ -282,16 +247,67 @@ function enterRoom(room, name) {
   }
 
   /*
-   * IMPORTANTE:
-   * limpamos a lista antes de entrar.
+   * Mostra imediatamente o próprio usuário.
+   * Isso corrige o problema de "não aparecer que eu estou na call".
    */
-  participants.clear();
 
-  renderParticipants();
+  addLocalParticipant();
 
   connectSocket();
 }
 
+/* =========================================================
+   ADICIONAR EU MESMO NA LISTA
+========================================================= */
+
+function addLocalParticipant() {
+  if (!myName) {
+    return;
+  }
+
+  /*
+   * Enquanto o servidor ainda não forneceu o peerId,
+   * usamos "me" temporariamente.
+   */
+
+  const localParticipant = {
+    peerId: myPeerId || "me",
+    name: myName,
+    admin: isAdmin,
+    mobile: isMobile,
+    muted: !micEnabled,
+    sharing: Boolean(localScreenStream)
+  };
+
+  participants.set(
+    localParticipant.peerId,
+    localParticipant
+  );
+
+  renderParticipants();
+}
+
+/* =========================================================
+   ATUALIZAR MEU PARTICIPANTE
+========================================================= */
+
+function updateLocalParticipant() {
+  const localKey = myPeerId || "me";
+
+  const current = participants.get(localKey) || {};
+
+  participants.set(localKey, {
+    ...current,
+    peerId: localKey,
+    name: myName,
+    admin: isAdmin,
+    mobile: isMobile,
+    muted: !micEnabled,
+    sharing: Boolean(localScreenStream)
+  });
+
+  renderParticipants();
+}
 
 /* =========================================================
    WEBSOCKET URL
@@ -310,9 +326,8 @@ function websocketUrl() {
   );
 }
 
-
 /* =========================================================
-   CONECTAR WEBSOCKET
+   CONECTAR SOCKET
 ========================================================= */
 
 function connectSocket() {
@@ -330,54 +345,46 @@ function connectSocket() {
     roomStatus.textContent = "Conectando...";
   }
 
-  try {
-    socket = new WebSocket(
-      websocketUrl()
-    );
-  } catch (error) {
-    console.error(error);
-
-    if (roomStatus) {
-      roomStatus.textContent =
-        "Erro de conexão";
-    }
-
-    scheduleReconnect();
-
-    return;
-  }
-
+  socket = new WebSocket(
+    websocketUrl()
+  );
 
   socket.addEventListener("open", () => {
     reconnectState.attempts = 0;
 
     if (roomStatus) {
-      roomStatus.textContent =
-        "Conectado";
+      roomStatus.textContent = "Conectado";
     }
 
     /*
-     * ENVIA O JOIN PARA O SERVIDOR
+     * IMPORTANTE:
+     * O servidor precisa receber o join.
      */
+
     send({
       type: "join",
       room: roomId,
       name: myName,
       mobile: isMobile
     });
-  });
 
+    /*
+     * Mostra novamente o próprio usuário
+     * enquanto esperamos a resposta do servidor.
+     */
+
+    addLocalParticipant();
+  });
 
   socket.addEventListener("message", async (event) => {
     let message;
 
     try {
-      message =
-        JSON.parse(event.data);
+      message = JSON.parse(event.data);
     } catch (error) {
       console.error(
-        "Mensagem inválida:",
-        event.data
+        "Mensagem WebSocket inválida:",
+        error
       );
 
       return;
@@ -386,16 +393,13 @@ function connectSocket() {
     await handleMessage(message);
   });
 
-
   socket.addEventListener("close", () => {
     if (roomStatus) {
-      roomStatus.textContent =
-        "Desconectado";
+      roomStatus.textContent = "Desconectado";
     }
 
     scheduleReconnect();
   });
-
 
   socket.addEventListener("error", (error) => {
     console.error(
@@ -410,38 +414,33 @@ function connectSocket() {
   });
 }
 
-
 /* =========================================================
    RECONEXÃO
 ========================================================= */
 
 function scheduleReconnect() {
-  if (
-    reconnectState.timer ||
-    !roomId
-  ) {
+  if (reconnectState.timer) {
     return;
   }
 
   reconnectState.attempts++;
 
-  const delay =
-    Math.min(
-      10000,
-      1000 * reconnectState.attempts
-    );
+  const delay = Math.min(
+    10000,
+    1000 * reconnectState.attempts
+  );
 
-  reconnectState.timer =
-    setTimeout(() => {
-      reconnectState.timer = null;
+  reconnectState.timer = setTimeout(() => {
+    reconnectState.timer = null;
 
+    if (roomId) {
       connectSocket();
-    }, delay);
+    }
+  }, delay);
 }
 
-
 /* =========================================================
-   ENVIAR
+   SEND
 ========================================================= */
 
 function send(message) {
@@ -468,7 +467,6 @@ function send(message) {
   }
 }
 
-
 /* =========================================================
    MENSAGENS
 ========================================================= */
@@ -484,36 +482,29 @@ async function handleMessage(msg) {
       await handleJoined(msg);
       break;
 
-
     case "participant-joined":
       handleParticipantJoined(msg);
       break;
-
 
     case "participant-left":
       handleParticipantLeft(msg);
       break;
 
-
     case "participant-updated":
       handleParticipantUpdated(msg);
       break;
-
 
     case "participants-refresh":
       handleParticipantsRefresh(msg);
       break;
 
-
     case "signal":
       await handleSignal(msg);
       break;
 
-
     case "chat":
       addChatMessage(msg);
       break;
-
 
     case "error":
       toast(
@@ -521,7 +512,6 @@ async function handleMessage(msg) {
         "Ocorreu um erro."
       );
       break;
-
 
     case "kicked":
       toast(
@@ -535,23 +525,22 @@ async function handleMessage(msg) {
 
       break;
 
-
     case "forced-mute":
       setLocalMute(
         Boolean(msg.muted)
       );
       break;
 
-
     case "force-stop-share":
       stopScreenShare(false);
       break;
 
-
     case "admin-promoted":
+
       isAdmin = true;
 
       updateAdminInterface();
+      updateLocalParticipant();
 
       toast(
         "Você agora é o administrador da sala."
@@ -559,15 +548,13 @@ async function handleMessage(msg) {
 
       break;
 
-
     default:
       console.log(
-        "Mensagem desconhecida:",
+        "Mensagem recebida:",
         msg
       );
   }
 }
-
 
 /* =========================================================
    JOINED
@@ -575,131 +562,133 @@ async function handleMessage(msg) {
 
 async function handleJoined(msg) {
   /*
-   * O servidor precisa mandar nosso peerId.
+   * Guardamos o ID real fornecido pelo servidor.
    */
 
-  myPeerId =
-    msg.peerId ||
-    msg.id ||
-    "";
+  if (msg.peerId) {
+    const oldKey = myPeerId || "me";
 
-
-  roomId =
-    msg.room ||
-    roomId;
-
-
-  isAdmin =
-    Boolean(
-      msg.admin
-    );
-
-
-  if (roomCodeEl) {
-    roomCodeEl.textContent =
-      roomId;
-  }
-
-
-  /*
-   * PRIMEIRO:
-   * adicionamos nós mesmos.
-   *
-   * Isso corrige o problema de
-   * "não aparece quem está na call".
-   */
-
-  const myself = {
-    peerId: myPeerId,
-    id: myPeerId,
-    name: myName,
-    mobile: isMobile,
-    admin: isAdmin,
-    muted: true,
-    sharing: false
-  };
-
-
-  if (myPeerId) {
-    participants.set(
-      myPeerId,
-      myself
-    );
-  }
-
-
-  /*
-   * Depois adicionamos os demais.
-   */
-
-  const list =
-    Array.isArray(msg.participants)
-      ? msg.participants
-      : [];
-
-
-  for (const participant of list) {
-    if (!participant) {
-      continue;
-    }
-
-    const peerId =
-      participant.peerId ||
-      participant.id;
-
-    if (!peerId) {
-      continue;
-    }
+    myPeerId = msg.peerId;
 
     /*
-     * Evita duplicar nós mesmos.
+     * Remove a versão temporária "me".
      */
-    if (peerId === myPeerId) {
-      continue;
-    }
 
-    participants.set(
-      peerId,
-      normalizeParticipant(
-        participant
-      )
-    );
+    if (
+      oldKey !== myPeerId &&
+      participants.has(oldKey)
+    ) {
+      participants.delete(oldKey);
+    }
   }
 
+  if (msg.room) {
+    roomId = msg.room;
+  }
 
+  isAdmin = Boolean(msg.admin);
+
+  if (roomCodeEl) {
+    roomCodeEl.textContent = roomId;
+  }
+
+  /*
+   * Primeiro limpa a lista.
+   */
+
+  participants.clear();
+
+  /*
+   * Adiciona todos que o servidor informou.
+   */
+
+  if (
+    Array.isArray(msg.participants)
+  ) {
+    for (
+      const participant
+      of msg.participants
+    ) {
+      if (
+        participant &&
+        participant.peerId
+      ) {
+        participants.set(
+          participant.peerId,
+          participant
+        );
+      }
+    }
+  }
+
+  /*
+   * GARANTE que EU apareça.
+   */
+
+  participants.set(
+    myPeerId,
+    {
+      peerId: myPeerId,
+      name: myName,
+      admin: isAdmin,
+      mobile: isMobile,
+      muted: !micEnabled,
+      sharing: Boolean(localScreenStream)
+    }
+  );
+
+  renderParticipants();
   updateAdminInterface();
+
+  /*
+   * Criar WebRTC com quem já estava na sala.
+   */
+
+  if (
+    Array.isArray(msg.participants)
+  ) {
+
+    for (
+      const participant
+      of msg.participants
+    ) {
+
+      if (
+        !participant ||
+        !participant.peerId ||
+        participant.peerId === myPeerId
+      ) {
+        continue;
+      }
+
+      addParticipant(participant);
+
+      try {
+        await createPeerConnection(
+          participant.peerId,
+          true
+        );
+      } catch (error) {
+        console.error(
+          "Erro criando peer:",
+          error
+        );
+      }
+    }
+  }
 
   renderParticipants();
 
-
-  /*
-   * Criar conexões com quem
-   * já estava na sala.
-   */
-
-  for (const participant of participants.values()) {
-
-    if (
-      participant.peerId ===
-      myPeerId
-    ) {
-      continue;
-    }
-
-    await createPeerConnection(
-      participant.peerId,
-      true
-    );
-  }
-
-
   if (isMobile) {
     toast(
-      "Você está no modo espectador. No celular é possível assistir às transmissões."
+      "Você entrou como espectador. No celular é possível apenas assistir."
+    );
+  } else {
+    toast(
+      "Você entrou na sala."
     );
   }
 }
-
 
 /* =========================================================
    PARTICIPANTE ENTROU
@@ -708,58 +697,38 @@ async function handleJoined(msg) {
 function handleParticipantJoined(msg) {
   const participant =
     msg.participant ||
-    msg.user ||
-    msg;
-
-
-  const normalized =
-    normalizeParticipant(
-      participant
-    );
-
-
-  if (!normalized.peerId) {
-    return;
-  }
-
+    msg.user;
 
   if (
-    normalized.peerId ===
-    myPeerId
+    !participant ||
+    !participant.peerId
   ) {
+    console.warn(
+      "participant-joined sem participante:",
+      msg
+    );
+
     return;
   }
 
-
-  participants.set(
-    normalized.peerId,
-    normalized
-  );
-
-
-  renderParticipants();
-
-
-  toast(
-    `${normalized.name} entrou na sala.`
-  );
-
+  addParticipant(participant);
 
   /*
-   * Quem já estava na sala
-   * cria conexão com o novo usuário.
+   * Não criamos conexão aqui como iniciador
+   * se o servidor já controla o fluxo.
    *
-   * O novo usuário também receberá
-   * os participantes e criará as
-   * conexões dele.
+   * O novo usuário normalmente recebe os
+   * participantes existentes no joined.
    */
 
-  createPeerConnection(
-    normalized.peerId,
-    false
-  );
+  if (
+    participant.peerId !== myPeerId
+  ) {
+    toast(
+      `${participant.name || "Alguém"} entrou na sala.`
+    );
+  }
 }
-
 
 /* =========================================================
    PARTICIPANTE SAIU
@@ -768,56 +737,23 @@ function handleParticipantJoined(msg) {
 function handleParticipantLeft(msg) {
   const peerId =
     msg.peerId ||
-    msg.id ||
-    msg.participant?.peerId;
-
+    msg.id;
 
   if (!peerId) {
     return;
   }
 
-
   const participant =
-    participants.get(
-      peerId
-    );
+    participants.get(peerId);
 
-
-  participants.delete(
-    peerId
-  );
-
-
-  const pc =
-    peers.get(
-      peerId
-    );
-
-
-  if (pc) {
-    try {
-      pc.close();
-    } catch {}
-
-    peers.delete(
-      peerId
-    );
-  }
-
-
-  removeVideo(peerId);
-
-
-  renderParticipants();
-
+  removeParticipant(peerId);
 
   if (participant) {
     toast(
-      `${participant.name} saiu da sala.`
+      `${participant.name || "Usuário"} saiu da sala.`
     );
   }
 }
-
 
 /* =========================================================
    PARTICIPANTE ATUALIZADO
@@ -826,39 +762,22 @@ function handleParticipantLeft(msg) {
 function handleParticipantUpdated(msg) {
   const participant =
     msg.participant ||
-    msg.user ||
-    msg;
+    msg.user;
 
-
-  const normalized =
-    normalizeParticipant(
-      participant
-    );
-
-
-  if (!normalized.peerId) {
+  if (
+    !participant ||
+    !participant.peerId
+  ) {
     return;
   }
 
-
-  participants.set(
-    normalized.peerId,
-    normalized
-  );
-
-
-  renderParticipants();
-
-
-  updateVideoName(
-    normalized.peerId,
-    normalized.name
+  updateParticipant(
+    participant
   );
 }
 
-
 /* =========================================================
-   REFRESH PARTICIPANTES
+   PARTICIPANTES REFRESH
 ========================================================= */
 
 function handleParticipantsRefresh(msg) {
@@ -867,137 +786,114 @@ function handleParticipantsRefresh(msg) {
       ? msg.participants
       : [];
 
+  refreshParticipants(list);
 
   /*
-   * Não apagamos nós mesmos.
+   * Garante que eu continue aparecendo.
    */
 
-  const myself =
-    participants.get(
-      myPeerId
-    );
+  updateLocalParticipant();
+}
 
+/* =========================================================
+   PARTICIPANTES
+========================================================= */
 
+function refreshParticipants(list) {
   participants.clear();
 
+  for (
+    const participant
+    of list
+  ) {
+    if (
+      participant &&
+      participant.peerId
+    ) {
+      participants.set(
+        participant.peerId,
+        participant
+      );
+    }
+  }
 
   /*
-   * Sempre adiciona nós mesmos.
+   * Nunca deixar o próprio usuário desaparecer.
    */
 
-  if (myself && myPeerId) {
+  if (myName) {
     participants.set(
-      myPeerId,
-      myself
-    );
-  } else if (myPeerId) {
-    participants.set(
-      myPeerId,
+      myPeerId || "me",
       {
-        peerId: myPeerId,
-        id: myPeerId,
+        peerId: myPeerId || "me",
         name: myName,
-        mobile: isMobile,
         admin: isAdmin,
+        mobile: isMobile,
         muted: !micEnabled,
-        sharing: false
+        sharing: Boolean(localScreenStream)
       }
     );
   }
 
+  renderParticipants();
+}
 
-  for (const participant of list) {
-    const normalized =
-      normalizeParticipant(
-        participant
-      );
-
-
-    if (!normalized.peerId) {
-      continue;
-    }
-
-
-    if (
-      normalized.peerId ===
-      myPeerId
-    ) {
-      continue;
-    }
-
-
-    participants.set(
-      normalized.peerId,
-      normalized
-    );
+function addParticipant(participant) {
+  if (
+    !participant ||
+    !participant.peerId
+  ) {
+    return;
   }
 
+  participants.set(
+    participant.peerId,
+    participant
+  );
 
   renderParticipants();
 }
 
-
-/* =========================================================
-   NORMALIZAR PARTICIPANTE
-========================================================= */
-
-function normalizeParticipant(participant) {
-  if (!participant) {
-    return {
-      peerId: "",
-      id: "",
-      name: "Convidado",
-      mobile: false,
-      admin: false,
-      muted: true,
-      sharing: false
-    };
+function updateParticipant(participant) {
+  if (
+    !participant ||
+    !participant.peerId
+  ) {
+    return;
   }
 
+  participants.set(
+    participant.peerId,
+    participant
+  );
 
-  const peerId =
-    participant.peerId ||
-    participant.id ||
-    participant.userId ||
-    "";
-
-
-  return {
-    ...participant,
-
-    peerId,
-
-    id:
-      participant.id ||
-      peerId,
-
-    name:
-      participant.name ||
-      participant.username ||
-      "Convidado",
-
-    mobile:
-      Boolean(
-        participant.mobile
-      ),
-
-    admin:
-      Boolean(
-        participant.admin
-      ),
-
-    muted:
-      participant.muted !== undefined
-        ? Boolean(participant.muted)
-        : true,
-
-    sharing:
-      Boolean(
-        participant.sharing
-      )
-  };
+  renderParticipants();
 }
 
+function removeParticipant(peerId) {
+  if (!peerId) {
+    return;
+  }
+
+  participants.delete(
+    peerId
+  );
+
+  const peer =
+    peers.get(peerId);
+
+  if (peer) {
+    try {
+      peer.close();
+    } catch {}
+
+    peers.delete(peerId);
+  }
+
+  removeVideo(peerId);
+
+  renderParticipants();
+}
 
 /* =========================================================
    RENDER PARTICIPANTES
@@ -1008,11 +904,36 @@ function renderParticipants() {
     return;
   }
 
-
   participantsEl.innerHTML = "";
 
+  /*
+   * Ordena colocando ADM primeiro
+   * e depois os demais.
+   */
 
-  for (const participant of participants.values()) {
+  const list =
+    Array.from(
+      participants.values()
+    ).sort((a, b) => {
+      if (a.admin && !b.admin) {
+        return -1;
+      }
+
+      if (!a.admin && b.admin) {
+        return 1;
+      }
+
+      return (
+        (a.name || "").localeCompare(
+          b.name || ""
+        )
+      );
+    });
+
+  for (
+    const participant
+    of list
+  ) {
 
     const row =
       document.createElement("div");
@@ -1020,6 +941,14 @@ function renderParticipants() {
     row.className =
       "participant";
 
+    if (
+      participant.peerId === myPeerId ||
+      participant.peerId === "me"
+    ) {
+      row.classList.add(
+        "me"
+      );
+    }
 
     /*
      * Avatar
@@ -1039,7 +968,6 @@ function renderParticipants() {
         .charAt(0)
         .toUpperCase();
 
-
     /*
      * Nome
      */
@@ -1054,12 +982,37 @@ function renderParticipants() {
       participant.name ||
       "Convidado";
 
+    /*
+     * Meu nome
+     */
+
+    if (
+      participant.peerId === myPeerId ||
+      participant.peerId === "me"
+    ) {
+
+      const you =
+        document.createElement("span");
+
+      you.className =
+        "you-badge";
+
+      you.textContent =
+        "Você";
+
+      name.appendChild(
+        you
+      );
+    }
 
     /*
      * ADM
      */
 
-    if (participant.admin) {
+    if (
+      participant.admin
+    ) {
+
       const badge =
         document.createElement("span");
 
@@ -1073,30 +1026,6 @@ function renderParticipants() {
         badge
       );
     }
-
-
-    /*
-     * "VOCÊ"
-     */
-
-    if (
-      participant.peerId ===
-      myPeerId
-    ) {
-      const you =
-        document.createElement("span");
-
-      you.className =
-        "you-badge";
-
-      you.textContent =
-        " VOCÊ";
-
-      name.appendChild(
-        you
-      );
-    }
-
 
     /*
      * Dispositivo
@@ -1113,7 +1042,6 @@ function renderParticipants() {
         ? "📱"
         : "💻";
 
-
     /*
      * Microfone
      */
@@ -1129,13 +1057,13 @@ function renderParticipants() {
         ? "🔇"
         : "🎙️";
 
-
-    if (participant.muted) {
+    if (
+      participant.muted
+    ) {
       mic.classList.add(
         "muted"
       );
     }
-
 
     /*
      * Compartilhando
@@ -1157,30 +1085,29 @@ function renderParticipants() {
       mic
     );
 
+    if (
+      participant.sharing
+    ) {
 
-    if (participant.sharing) {
       const dot =
         document.createElement("span");
 
       dot.className =
         "sharing-dot";
 
-      dot.title =
-        "Compartilhando tela";
-
       row.appendChild(
         dot
       );
     }
 
-
     /*
-     * BOTÕES DO ADMIN
+     * AÇÕES ADM
      */
 
     if (
       isAdmin &&
-      participant.peerId !== myPeerId
+      participant.peerId !== myPeerId &&
+      participant.peerId !== "me"
     ) {
 
       const actions =
@@ -1188,7 +1115,6 @@ function renderParticipants() {
 
       actions.className =
         "participant-actions";
-
 
       /*
        * MUTE
@@ -1206,13 +1132,12 @@ function renderParticipants() {
       mute.title =
         participant.muted
           ? "Ativar microfone"
-          : "Silenciar usuário";
+          : "Mutar usuário";
 
       mute.textContent =
         participant.muted
           ? "🔊"
           : "🔇";
-
 
       mute.addEventListener(
         "click",
@@ -1226,7 +1151,6 @@ function renderParticipants() {
           );
         }
       );
-
 
       /*
        * EXPULSAR
@@ -1247,7 +1171,6 @@ function renderParticipants() {
       kick.textContent =
         "✕";
 
-
       kick.addEventListener(
         "click",
         (event) => {
@@ -1259,7 +1182,6 @@ function renderParticipants() {
           );
         }
       );
-
 
       actions.appendChild(
         mute
@@ -1274,12 +1196,10 @@ function renderParticipants() {
       );
     }
 
-
     participantsEl.appendChild(
       row
     );
   }
-
 
   if (countEl) {
     countEl.textContent =
@@ -1289,9 +1209,8 @@ function renderParticipants() {
   }
 }
 
-
 /* =========================================================
-   ADMIN
+   ADMIN INTERFACE
 ========================================================= */
 
 function updateAdminInterface() {
@@ -1299,13 +1218,11 @@ function updateAdminInterface() {
     return;
   }
 
-
   if (isAdmin) {
 
     roomPage.classList.add(
       "admin-mode"
     );
-
 
     if (adminButton) {
       adminButton.style.display =
@@ -1318,52 +1235,18 @@ function updateAdminInterface() {
       "admin-mode"
     );
 
-
     if (adminButton) {
       adminButton.style.display =
         "none";
     }
-
 
     adminPanel?.classList.add(
       "hidden"
     );
   }
 
-
-  /*
-   * Atualiza a informação do
-   * nosso próprio usuário.
-   */
-
-  if (myPeerId) {
-
-    const myself =
-      participants.get(
-        myPeerId
-      );
-
-
-    if (myself) {
-
-      myself.admin =
-        isAdmin;
-
-      myself.name =
-        myName;
-
-      myself.muted =
-        !micEnabled;
-
-      myself.mobile =
-        isMobile;
-    }
-  }
-
-
   renderParticipants();
 }
-
 
 /* =========================================================
    MENU ADMIN
@@ -1380,15 +1263,13 @@ window.toggleAdminPanel =
       return;
     }
 
-
     adminPanel?.classList.toggle(
       "hidden"
     );
   };
 
-
 /* =========================================================
-   ADMIN - MUTAR TODOS
+   MUTAR TODOS
 ========================================================= */
 
 window.adminMuteAll =
@@ -1398,21 +1279,18 @@ window.adminMuteAll =
       return;
     }
 
-
     send({
       type:
         "admin-mute-all"
     });
 
-
     toast(
-      "Microfones dos participantes foram silenciados."
+      "Silenciando participantes..."
     );
   };
 
-
 /* =========================================================
-   ADMIN - PARAR TRANSMISSÕES
+   PARAR TODAS AS TRANSMISSÕES
 ========================================================= */
 
 window.adminStopShares =
@@ -1422,21 +1300,18 @@ window.adminStopShares =
       return;
     }
 
-
     send({
       type:
         "admin-stop-shares"
     });
-
 
     toast(
       "Encerrando transmissões..."
     );
   };
 
-
 /* =========================================================
-   ADMIN - COPIAR CONVITE
+   COPIAR CONVITE
 ========================================================= */
 
 window.adminCopyInvite =
@@ -1444,16 +1319,18 @@ window.adminCopyInvite =
     copyInvite();
   };
 
-
 /* =========================================================
-   ADMIN - MUTAR USUÁRIO
+   ADM - MUTE
 ========================================================= */
 
-function adminMuteUser(peerId, muted) {
+function adminMuteUser(
+  peerId,
+  muted
+) {
+
   if (!isAdmin) {
     return;
   }
-
 
   send({
     type:
@@ -1465,38 +1342,33 @@ function adminMuteUser(peerId, muted) {
   });
 }
 
-
 /* =========================================================
-   ADMIN - EXPULSAR
+   ADM - KICK
 ========================================================= */
 
-function adminKickUser(peerId) {
+function adminKickUser(
+  peerId
+) {
+
   if (!isAdmin) {
     return;
   }
 
-
   const participant =
-    participants.get(
-      peerId
-    );
-
+    participants.get(peerId);
 
   if (!participant) {
     return;
   }
 
-
   const confirmed =
     confirm(
-      `Expulsar ${participant.name} da sala?`
+      `Expulsar ${participant.name || "usuário"} da sala?`
     );
-
 
   if (!confirmed) {
     return;
   }
-
 
   send({
     type:
@@ -1505,7 +1377,6 @@ function adminKickUser(peerId) {
     peerId
   });
 }
-
 
 /* =========================================================
    WEBRTC
@@ -1516,27 +1387,11 @@ function createPeerConnection(
   initiator
 ) {
 
-  if (!peerId) {
-    return null;
-  }
-
-
-  if (
-    peerId ===
-    myPeerId
-  ) {
-    return null;
-  }
-
-
   if (
     peers.has(peerId)
   ) {
-    return peers.get(
-      peerId
-    );
+    return peers.get(peerId);
   }
-
 
   const pc =
     new RTCPeerConnection({
@@ -1552,12 +1407,10 @@ function createPeerConnection(
       ]
     });
 
-
   peers.set(
     peerId,
     pc
   );
-
 
   /*
    * MICROFONE
@@ -1570,13 +1423,23 @@ function createPeerConnection(
       of localMicStream.getTracks()
     ) {
 
-      pc.addTrack(
-        track,
-        localMicStream
-      );
+      try {
+
+        pc.addTrack(
+          track,
+          localMicStream
+        );
+
+      } catch (error) {
+
+        console.error(
+          "Erro adicionando microfone:",
+          error
+        );
+
+      }
     }
   }
-
 
   /*
    * TELA
@@ -1589,13 +1452,23 @@ function createPeerConnection(
       of localScreenStream.getTracks()
     ) {
 
-      pc.addTrack(
-        track,
-        localScreenStream
-      );
+      try {
+
+        pc.addTrack(
+          track,
+          localScreenStream
+        );
+
+      } catch (error) {
+
+        console.error(
+          "Erro adicionando tela:",
+          error
+        );
+
+      }
     }
   }
-
 
   /*
    * ICE
@@ -1626,7 +1499,6 @@ function createPeerConnection(
       }
     };
 
-
   /*
    * TRACK
    */
@@ -1634,14 +1506,22 @@ function createPeerConnection(
   pc.ontrack =
     (event) => {
 
-      const stream =
-        event.streams?.[0];
+      let stream =
+        event.streams &&
+        event.streams[0];
 
+      /*
+       * Alguns navegadores podem não
+       * entregar streams no evento.
+       */
 
       if (!stream) {
-        return;
-      }
 
+        stream =
+          new MediaStream([
+            event.track
+          ]);
+      }
 
       showRemoteVideo(
         peerId,
@@ -1649,20 +1529,18 @@ function createPeerConnection(
       );
     };
 
-
   /*
-   * ESTADO
+   * CONEXÃO
    */
 
   pc.onconnectionstatechange =
     () => {
 
       console.log(
-        "WebRTC",
+        "Peer",
         peerId,
         pc.connectionState
       );
-
 
       if (
         pc.connectionState ===
@@ -1674,7 +1552,6 @@ function createPeerConnection(
         } catch {}
       }
 
-
       if (
         pc.connectionState ===
         "closed"
@@ -1684,27 +1561,45 @@ function createPeerConnection(
           peerId
         );
       }
+
+      if (
+        pc.connectionState ===
+        "disconnected"
+      ) {
+
+        setTimeout(() => {
+
+          if (
+            pc.connectionState ===
+            "disconnected"
+          ) {
+
+            removeVideo(
+              peerId
+            );
+          }
+
+        }, 5000);
+      }
     };
 
-
   /*
-   * OFERTA
+   * NEGOCIAÇÃO
    */
 
   if (initiator) {
+
     makeOffer(
       peerId,
       pc
     );
   }
 
-
   return pc;
 }
 
-
 /* =========================================================
-   OFERTA
+   OFFER
 ========================================================= */
 
 async function makeOffer(
@@ -1712,21 +1607,14 @@ async function makeOffer(
   pc
 ) {
 
-  if (!pc) {
-    return;
-  }
-
-
   try {
 
     const offer =
       await pc.createOffer();
 
-
     await pc.setLocalDescription(
       offer
     );
-
 
     send({
       type:
@@ -1753,35 +1641,20 @@ async function makeOffer(
   }
 }
 
-
 /* =========================================================
    SIGNAL
 ========================================================= */
 
 async function handleSignal(msg) {
   const peerId =
-    msg.from ||
-    msg.peerId;
-
+    msg.from;
 
   if (!peerId) {
     return;
   }
 
-
-  if (
-    peerId ===
-    myPeerId
-  ) {
-    return;
-  }
-
-
   let pc =
-    peers.get(
-      peerId
-    );
-
+    peers.get(peerId);
 
   if (!pc) {
 
@@ -1792,20 +1665,12 @@ async function handleSignal(msg) {
       );
   }
 
-
-  if (!pc) {
-    return;
-  }
-
-
   const signal =
     msg.signal;
-
 
   if (!signal) {
     return;
   }
-
 
   try {
 
@@ -1818,15 +1683,12 @@ async function handleSignal(msg) {
         signal.sdp
       );
 
-
       const answer =
         await pc.createAnswer();
-
 
       await pc.setLocalDescription(
         answer
       );
-
 
       send({
         type:
@@ -1843,8 +1705,8 @@ async function handleSignal(msg) {
             pc.localDescription
         }
       });
-    }
 
+    }
 
     else if (
       signal.type ===
@@ -1854,8 +1716,8 @@ async function handleSignal(msg) {
       await pc.setRemoteDescription(
         signal.sdp
       );
-    }
 
+    }
 
     else if (
       signal.type ===
@@ -1891,7 +1753,6 @@ async function handleSignal(msg) {
   }
 }
 
-
 /* =========================================================
    VÍDEO REMOTO
 ========================================================= */
@@ -1905,19 +1766,15 @@ function showRemoteVideo(
     return;
   }
 
-
   let card =
     document.getElementById(
       `video-${peerId}`
     );
 
-
   if (!card) {
 
     card =
-      document.createElement(
-        "div"
-      );
+      document.createElement("div");
 
     card.className =
       "video-card";
@@ -1925,11 +1782,12 @@ function showRemoteVideo(
     card.id =
       `video-${peerId}`;
 
+    /*
+     * VIDEO
+     */
 
     const video =
-      document.createElement(
-        "video"
-      );
+      document.createElement("video");
 
     video.autoplay =
       true;
@@ -1946,45 +1804,43 @@ function showRemoteVideo(
     video.volume =
       1;
 
+    video.srcObject =
+      stream;
 
     card.appendChild(
       video
     );
 
+    /*
+     * NOME
+     */
 
     const name =
-      document.createElement(
-        "div"
-      );
+      document.createElement("div");
 
     name.className =
       "video-name";
-
 
     const participant =
       participants.get(
         peerId
       );
 
-
     name.textContent =
       participant?.name ||
       "Participante";
-
 
     card.appendChild(
       name
     );
 
-
     videos.appendChild(
       card
     );
 
-
-    video.srcObject =
-      stream;
-
+    /*
+     * PLAY
+     */
 
     video.play()
       .catch(() => {
@@ -1994,6 +1850,9 @@ function showRemoteVideo(
         );
       });
 
+    /*
+     * Clique libera áudio
+     */
 
     card.addEventListener(
       "click",
@@ -2017,32 +1876,30 @@ function showRemoteVideo(
         "video"
       );
 
-
     if (
       video &&
-      video.srcObject !==
-      stream
+      video.srcObject !== stream
     ) {
 
       video.srcObject =
         stream;
+
+      video.play()
+        .catch(() => {});
     }
   }
-
 
   emptyState?.classList.add(
     "hidden"
   );
 }
 
-
 /* =========================================================
-   ATUALIZAR NOME DO VÍDEO
+   REMOVER VÍDEO
 ========================================================= */
 
-function updateVideoName(
-  peerId,
-  name
+function removeVideo(
+  peerId
 ) {
 
   const card =
@@ -2050,41 +1907,9 @@ function updateVideoName(
       `video-${peerId}`
     );
 
-
-  if (!card) {
-    return;
-  }
-
-
-  const nameEl =
-    card.querySelector(
-      ".video-name"
-    );
-
-
-  if (nameEl) {
-    nameEl.textContent =
-      name ||
-      "Participante";
-  }
-}
-
-
-/* =========================================================
-   REMOVER VÍDEO
-========================================================= */
-
-function removeVideo(peerId) {
-  const card =
-    document.getElementById(
-      `video-${peerId}`
-    );
-
-
   if (card) {
     card.remove();
   }
-
 
   if (
     videos &&
@@ -2096,7 +1921,6 @@ function removeVideo(peerId) {
     );
   }
 }
-
 
 /* =========================================================
    COMPARTILHAR TELA
@@ -2113,7 +1937,6 @@ async function startScreenShare() {
     return;
   }
 
-
   if (localScreenStream) {
 
     toast(
@@ -2122,7 +1945,6 @@ async function startScreenShare() {
 
     return;
   }
-
 
   if (
     !navigator.mediaDevices ||
@@ -2136,7 +1958,6 @@ async function startScreenShare() {
     return;
   }
 
-
   try {
 
     const stream =
@@ -2147,18 +1968,14 @@ async function startScreenShare() {
             max: 60
           }
         },
-
         audio: true
       });
-
 
     localScreenStream =
       stream;
 
-
     const videoTrack =
       stream.getVideoTracks()[0];
-
 
     if (videoTrack) {
 
@@ -2173,16 +1990,16 @@ async function startScreenShare() {
       );
     }
 
-
     /*
-     * Adiciona tela aos peers
+     * Adiciona a tela aos peers.
      */
 
     for (
       const [
         peerId,
         pc
-      ] of peers
+      ]
+      of peers
     ) {
 
       for (
@@ -2197,24 +2014,23 @@ async function startScreenShare() {
             stream
           );
 
-        } catch {}
+        } catch (error) {
+
+          console.error(
+            "Erro adicionando tela:",
+            error
+          );
+        }
       }
-
-
-      /*
-       * Renegociação
-       */
 
       try {
 
         const offer =
           await pc.createOffer();
 
-
         await pc.setLocalDescription(
           offer
         );
-
 
         send({
           type:
@@ -2241,7 +2057,6 @@ async function startScreenShare() {
       }
     }
 
-
     send({
       type:
         "sharing",
@@ -2250,11 +2065,7 @@ async function startScreenShare() {
         true
     });
 
-
-    updateMyParticipant({
-      sharing: true
-    });
-
+    updateLocalParticipant();
 
     shareBtn?.classList.add(
       "hidden"
@@ -2268,7 +2079,6 @@ async function startScreenShare() {
       "hidden"
     );
 
-
     toast(
       "Transmissão iniciada."
     );
@@ -2279,7 +2089,6 @@ async function startScreenShare() {
       "Compartilhamento:",
       error
     );
-
 
     if (
       error.name ===
@@ -2298,7 +2107,6 @@ async function startScreenShare() {
     }
   }
 }
-
 
 /* =========================================================
    PARAR TELA
@@ -2320,27 +2128,33 @@ function stopScreenShare(
       } catch {}
     }
 
-
     localScreenStream =
       null;
   }
 
-
   /*
-   * Remove vídeo dos senders.
+   * Remove apenas tracks de vídeo.
+   *
+   * OBS:
+   * A renegociação será feita quando
+   * necessário.
    */
 
-  for (const pc of peers.values()) {
+  for (
+    const pc
+    of peers.values()
+  ) {
 
     const senders =
       pc.getSenders();
 
-
-    for (const sender of senders) {
+    for (
+      const sender
+      of senders
+    ) {
 
       const track =
         sender.track;
-
 
       if (
         track &&
@@ -2357,7 +2171,6 @@ function stopScreenShare(
     }
   }
 
-
   if (notifyServer) {
 
     send({
@@ -2369,11 +2182,7 @@ function stopScreenShare(
     });
   }
 
-
-  updateMyParticipant({
-    sharing: false
-  });
-
+  updateLocalParticipant();
 
   shareBtn?.classList.remove(
     "hidden"
@@ -2387,12 +2196,10 @@ function stopScreenShare(
     "hidden"
   );
 
-
   toast(
     "Transmissão encerrada."
   );
 }
-
 
 /* =========================================================
    MICROFONE
@@ -2409,48 +2216,38 @@ async function toggleMicrophone() {
     return;
   }
 
-
-  if (
-    !navigator.mediaDevices ||
-    !navigator.mediaDevices.getUserMedia
-  ) {
-
-    toast(
-      "Seu navegador não permite acessar o microfone."
-    );
-
-    return;
-  }
-
-
   try {
 
     /*
-     * Primeiro acesso ao microfone.
+     * PRIMEIRA VEZ
      */
 
     if (!localMicStream) {
 
       localMicStream =
         await navigator.mediaDevices.getUserMedia({
-          audio: true,
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          },
           video: false
         });
-
 
       micEnabled =
         true;
 
-
       /*
-       * Adiciona áudio aos peers.
+       * Adiciona microfone
+       * aos peers.
        */
 
       for (
         const [
           peerId,
           pc
-        ] of peers
+        ]
+        of peers
       ) {
 
         for (
@@ -2468,17 +2265,14 @@ async function toggleMicrophone() {
           } catch {}
         }
 
-
         try {
 
           const offer =
             await pc.createOffer();
 
-
           await pc.setLocalDescription(
             offer
           );
-
 
           send({
             type:
@@ -2505,15 +2299,16 @@ async function toggleMicrophone() {
         }
       }
 
-    } else {
+    }
 
-      /*
-       * Liga/desliga.
-       */
+    /*
+     * JÁ TEM MICROFONE
+     */
+
+    else {
 
       micEnabled =
         !micEnabled;
-
 
       for (
         const track
@@ -2525,15 +2320,9 @@ async function toggleMicrophone() {
       }
     }
 
-
     updateMicButton();
 
-
-    updateMyParticipant({
-      muted:
-        !micEnabled
-    });
-
+    updateLocalParticipant();
 
     send({
       type:
@@ -2549,7 +2338,6 @@ async function toggleMicrophone() {
       "Microfone:",
       error
     );
-
 
     if (
       error.name ===
@@ -2569,28 +2357,30 @@ async function toggleMicrophone() {
   }
 }
 
-
 /* =========================================================
-   MICROFONE FORÇADO
+   MUTE LOCAL
 ========================================================= */
 
-function setLocalMute(muted) {
+function setLocalMute(
+  muted
+) {
 
   if (!localMicStream) {
 
     micEnabled =
       !muted;
 
-
     updateMicButton();
+    updateLocalParticipant();
 
-    updateMyParticipant({
+    toast(
       muted
-    });
+        ? "Seu microfone foi silenciado."
+        : "Seu microfone foi ativado."
+    );
 
     return;
   }
-
 
   for (
     const track
@@ -2601,18 +2391,11 @@ function setLocalMute(muted) {
       !muted;
   }
 
-
   micEnabled =
     !muted;
 
-
   updateMicButton();
-
-
-  updateMyParticipant({
-    muted
-  });
-
+  updateLocalParticipant();
 
   toast(
     muted
@@ -2620,45 +2403,6 @@ function setLocalMute(muted) {
       : "Seu microfone foi ativado."
   );
 }
-
-
-/* =========================================================
-   ATUALIZAR MEU PARTICIPANTE
-========================================================= */
-
-function updateMyParticipant(data) {
-
-  if (!myPeerId) {
-    return;
-  }
-
-
-  const current =
-    participants.get(
-      myPeerId
-    );
-
-
-  if (!current) {
-    return;
-  }
-
-
-  Object.assign(
-    current,
-    data
-  );
-
-
-  participants.set(
-    myPeerId,
-    current
-  );
-
-
-  renderParticipants();
-}
-
 
 /* =========================================================
    BOTÃO MICROFONE
@@ -2669,7 +2413,6 @@ function updateMicButton() {
   if (!micBtn) {
     return;
   }
-
 
   if (micEnabled) {
 
@@ -2683,7 +2426,6 @@ function updateMicButton() {
   }
 }
 
-
 /* =========================================================
    CHAT
 ========================================================= */
@@ -2694,15 +2436,12 @@ chatForm?.addEventListener(
 
     event.preventDefault();
 
-
     const text =
       chatInput?.value.trim();
-
 
     if (!text) {
       return;
     }
-
 
     send({
       type:
@@ -2711,17 +2450,13 @@ chatForm?.addEventListener(
       text
     });
 
-
-    if (chatInput) {
-      chatInput.value =
-        "";
-    }
+    chatInput.value =
+      "";
   }
 );
 
-
 /* =========================================================
-   CHAT MESSAGE
+   ADICIONAR CHAT
 ========================================================= */
 
 function addChatMessage(message) {
@@ -2730,44 +2465,32 @@ function addChatMessage(message) {
     return;
   }
 
-
   const item =
-    document.createElement(
-      "div"
-    );
+    document.createElement("div");
 
   item.className =
     "message";
 
-
   const meta =
-    document.createElement(
-      "div"
-    );
+    document.createElement("div");
 
   meta.className =
     "meta";
-
 
   meta.textContent =
     message.from ||
     message.name ||
     "Convidado";
 
-
   const text =
-    document.createElement(
-      "div"
-    );
+    document.createElement("div");
 
   text.className =
     "text";
 
-
   text.textContent =
     message.text ||
     "";
-
 
   item.appendChild(
     meta
@@ -2777,16 +2500,13 @@ function addChatMessage(message) {
     text
   );
 
-
   chatMessages.appendChild(
     item
   );
 
-
   chatMessages.scrollTop =
     chatMessages.scrollHeight;
 }
-
 
 /* =========================================================
    CONVITE
@@ -2799,91 +2519,64 @@ function getInviteUrl() {
       window.location.href
     );
 
-
   url.searchParams.set(
     "room",
     roomId
   );
 
-
   return url.toString();
 }
-
 
 async function copyInvite() {
 
   const invite =
     getInviteUrl();
 
-
   try {
 
-    if (
-      navigator.clipboard &&
-      window.isSecureContext
-    ) {
-
-      await navigator.clipboard.writeText(
-        invite
-      );
-
-    } else {
-
-      const textarea =
-        document.createElement(
-          "textarea"
-        );
-
-
-      textarea.value =
-        invite;
-
-
-      document.body.appendChild(
-        textarea
-      );
-
-
-      textarea.select();
-
-
-      document.execCommand(
-        "copy"
-      );
-
-
-      textarea.remove();
-    }
-
+    await navigator.clipboard.writeText(
+      invite
+    );
 
     toast(
       "Convite copiado!"
     );
 
-  } catch (error) {
+  } catch {
 
-    console.error(
-      error
+    const textarea =
+      document.createElement("textarea");
+
+    textarea.value =
+      invite;
+
+    document.body.appendChild(
+      textarea
     );
 
+    textarea.select();
+
+    document.execCommand(
+      "copy"
+    );
+
+    textarea.remove();
+
     toast(
-      "Não foi possível copiar o convite."
+      "Convite copiado!"
     );
   }
 }
-
 
 copyBtn?.addEventListener(
   "click",
   copyInvite
 );
 
-
 inviteBtn?.addEventListener(
   "click",
   copyInvite
 );
-
 
 /* =========================================================
    SAIR
@@ -2894,32 +2587,18 @@ leaveBtn?.addEventListener(
   leaveRoom
 );
 
-
 function leaveRoom() {
 
   /*
-   * Tela
+   * Para compartilhamento
    */
 
-  if (localScreenStream) {
-
-    for (
-      const track
-      of localScreenStream.getTracks()
-    ) {
-
-      try {
-        track.stop();
-      } catch {}
-    }
-
-    localScreenStream =
-      null;
-  }
-
+  stopScreenShare(
+    false
+  );
 
   /*
-   * Microfone
+   * Para microfone
    */
 
   if (localMicStream) {
@@ -2938,24 +2617,27 @@ function leaveRoom() {
       null;
   }
 
+  micEnabled =
+    false;
 
   /*
-   * Peers
+   * Fecha peers
    */
 
-  for (const pc of peers.values()) {
+  for (
+    const pc
+    of peers.values()
+  ) {
 
     try {
       pc.close();
     } catch {}
   }
 
-
   peers.clear();
 
-
   /*
-   * WebSocket
+   * Fecha WebSocket
    */
 
   if (socket) {
@@ -2968,51 +2650,35 @@ function leaveRoom() {
       null;
   }
 
-
   participants.clear();
-
 
   if (videos) {
     videos.innerHTML =
       "";
   }
 
-
-  emptyState?.classList.remove(
+  home?.classList.remove(
     "hidden"
   );
-
 
   roomPage?.classList.add(
     "hidden"
   );
 
-  home?.classList.remove(
-    "hidden"
+  const url =
+    new URL(
+      window.location.href
+    );
+
+  url.searchParams.delete(
+    "room"
   );
 
-
-  try {
-
-    const url =
-      new URL(
-        window.location.href
-      );
-
-
-    url.searchParams.delete(
-      "room"
-    );
-
-
-    history.replaceState(
-      {},
-      "",
-      url
-    );
-
-  } catch {}
-
+  history.replaceState(
+    {},
+    "",
+    url
+  );
 
   roomId =
     "";
@@ -3020,18 +2686,20 @@ function leaveRoom() {
   myPeerId =
     "";
 
+  myName =
+    "";
+
   isAdmin =
     false;
 
-  micEnabled =
-    false;
-
-
-  updateMicButton();
+  if (countEl) {
+    countEl.textContent =
+      "0";
+  }
 
   updateAdminInterface();
+  updateMicButton();
 }
-
 
 /* =========================================================
    BOTÕES
@@ -3042,12 +2710,10 @@ shareBtn?.addEventListener(
   startScreenShare
 );
 
-
 shareCenterBtn?.addEventListener(
   "click",
   startScreenShare
 );
-
 
 stopShareBtn?.addEventListener(
   "click",
@@ -3056,28 +2722,98 @@ stopShareBtn?.addEventListener(
   }
 );
 
-
 micBtn?.addEventListener(
   "click",
   toggleMicrophone
 );
 
+/* =========================================================
+   SALVAR NOME
+========================================================= */
+
+function saveName() {
+
+  const name =
+    nameHome?.value.trim();
+
+  if (name) {
+
+    localStorage.setItem(
+      "hype_name",
+      name
+    );
+  }
+}
+
+nameHome?.addEventListener(
+  "change",
+  saveName
+);
+
+/* =========================================================
+   CARREGAR PÁGINA
+========================================================= */
+
+window.addEventListener(
+  "load",
+  () => {
+
+    const room =
+      getRoomFromUrl();
+
+    const savedName =
+      localStorage.getItem(
+        "hype_name"
+      );
+
+    if (savedName && nameHome) {
+      nameHome.value =
+        savedName;
+    }
+
+    if (
+      room &&
+      savedName
+    ) {
+
+      enterRoom(
+        room,
+        savedName
+      );
+    }
+
+    /*
+     * Configuração mobile
+     */
+
+    if (isMobile) {
+
+      shareBtn?.classList.add(
+        "hidden"
+      );
+
+      shareCenterBtn?.classList.add(
+        "hidden"
+      );
+
+      stopShareBtn?.classList.add(
+        "hidden"
+      );
+
+      micBtn?.classList.add(
+        "hidden"
+      );
+    }
+
+    updateMicButton();
+  }
+);
 
 /* =========================================================
    MOBILE
 ========================================================= */
 
-function applyMobileRestrictions() {
-
-  if (!isMobile) {
-    return;
-  }
-
-
-  /*
-   * Android/iPhone:
-   * somente assistir.
-   */
+if (isMobile) {
 
   shareBtn?.classList.add(
     "hidden"
@@ -3096,120 +2832,29 @@ function applyMobileRestrictions() {
   );
 }
 
-
-applyMobileRestrictions();
-
-
 /* =========================================================
-   QUANDO A PÁGINA ABRE
-========================================================= */
-
-window.addEventListener(
-  "load",
-  () => {
-
-    const room =
-      getRoomFromUrl();
-
-
-    let savedName =
-      "";
-
-
-    try {
-
-      savedName =
-        localStorage.getItem(
-          "hype_name"
-        ) || "";
-
-    } catch {}
-
-
-    if (
-      nameHome &&
-      savedName
-    ) {
-
-      nameHome.value =
-        savedName;
-    }
-
-
-    /*
-     * Se houver sala na URL
-     * e nome salvo, entra automaticamente.
-     */
-
-    if (
-      room &&
-      savedName
-    ) {
-
-      enterRoom(
-        room,
-        savedName
-      );
-    }
-  }
-);
-
-
-/* =========================================================
-   BEFORE UNLOAD
+   ANTES DE FECHAR
 ========================================================= */
 
 window.addEventListener(
   "beforeunload",
   () => {
 
-    try {
+    if (socket) {
 
-      if (localScreenStream) {
-
-        for (
-          const track
-          of localScreenStream.getTracks()
-        ) {
-
-          track.stop();
-        }
-      }
-
-
-      if (localMicStream) {
-
-        for (
-          const track
-          of localMicStream.getTracks()
-        ) {
-
-          track.stop();
-        }
-      }
-
-
-      if (socket) {
+      try {
         socket.close();
-      }
-
-    } catch {}
+      } catch {}
+    }
   }
 );
 
-
 /* =========================================================
-   DEBUG
+   INICIALIZAÇÃO
 ========================================================= */
+
+updateMicButton();
 
 console.log(
   "Hype Roleplay app.js carregado."
 );
-
-console.log(
-  "Modo:",
-  isMobile
-    ? "MOBILE - ESPECTADOR"
-    : "PC - TRANSMISSOR"
-);
-```
