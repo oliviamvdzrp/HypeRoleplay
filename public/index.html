@@ -1,579 +1,765 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#08040f">
+  <meta charset="UTF-8">
 
-  <title>Hype Roleplay — Compartilhamento de Tela</title>
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
+  >
+
+  <meta name="theme-color" content="#08030f">
+
+  <title>Hype Roleplay — Compartilhar Tela</title>
 
   <link rel="stylesheet" href="/style.css">
 </head>
 
 <body>
 
-<div id="toast" class="toast"></div>
+  <!-- =====================================================
+       TOAST
+  ====================================================== -->
 
-<!-- =========================
-     INÍCIO
-========================= -->
+  <div id="toast" class="toast"></div>
 
-<main id="home" class="page home">
 
-  <header class="home-header">
+  <!-- =====================================================
+       TELA INICIAL
+  ====================================================== -->
 
-    <div class="brand">
+  <main id="home" class="home-page">
 
-      <div class="logo">
-        H
-      </div>
+    <div class="background-glow glow-one"></div>
+    <div class="background-glow glow-two"></div>
 
-      <div>
-        <strong>Hype Roleplay</strong>
-        <span>Compartilhamento de tela</span>
-      </div>
+    <header class="home-header">
 
-    </div>
+      <div class="brand">
 
-  </header>
-
-
-  <section class="hero-card">
-
-    <div class="hero-badge">
-      HYPE ROLEPLAY
-    </div>
-
-    <h1>
-      Compartilhe sua tela
-      <span>sem complicação.</span>
-    </h1>
-
-    <p>
-      Crie uma sala, envie o link para seus amigos
-      e compartilhe sua tela, janela ou aba diretamente
-      pelo navegador.
-    </p>
-
-
-    <div class="join-box">
-
-      <label for="nameHome">
-        Seu nome
-      </label>
-
-      <input
-        id="nameHome"
-        maxlength="30"
-        placeholder="Digite seu nome"
-        autocomplete="name"
-      >
-
-
-      <button
-        id="createBtn"
-        class="primary big-button"
-      >
-        <span>＋</span>
-        Criar uma sala
-      </button>
-
-    </div>
-
-
-    <div class="divider">
-      <span>OU ENTRE EM UMA SALA</span>
-    </div>
-
-
-    <div class="join-row">
-
-      <input
-        id="roomInput"
-        maxlength="32"
-        placeholder="Código da sala"
-      >
-
-      <button
-        id="joinBtn"
-        class="secondary"
-      >
-        Entrar
-      </button>
-
-    </div>
-
-  </section>
-
-
-  <section class="features">
-
-    <div class="feature-card">
-
-      <div class="feature-icon">
-        🖥️
-      </div>
-
-      <strong>
-        Compartilhe sua tela
-      </strong>
-
-      <span>
-        Tela inteira, janela ou aba do navegador.
-      </span>
-
-    </div>
-
-
-    <div class="feature-card">
-
-      <div class="feature-icon">
-        🔊
-      </div>
-
-      <strong>
-        Áudio
-      </strong>
-
-      <span>
-        Compartilhe o áudio quando o navegador permitir.
-      </span>
-
-    </div>
-
-
-    <div class="feature-card">
-
-      <div class="feature-icon">
-        🔗
-      </div>
-
-      <strong>
-        Link direto
-      </strong>
-
-      <span>
-        Envie o link e seus amigos entram na sala.
-      </span>
-
-    </div>
-
-  </section>
-
-</main>
-
-
-<!-- =========================
-     SALA
-========================= -->
-
-<main id="room" class="room-page hidden">
-
-
-  <!-- TOPBAR -->
-
-  <header class="topbar">
-
-    <div class="brand small">
-
-      <div class="logo">
-        H
-      </div>
-
-      <div>
-        <strong>Hype Roleplay</strong>
-
-        <span id="roomStatus">
-          Conectando...
-        </span>
-      </div>
-
-    </div>
-
-
-    <div class="room-code">
-
-      <span>SALA</span>
-
-      <b id="roomCode">
-        ------
-      </b>
-
-    </div>
-
-
-    <div class="top-actions">
-
-      <button
-        id="copyBtn"
-        class="icon-btn"
-        title="Copiar convite"
-      >
-        🔗
-      </button>
-
-
-      <!-- BOTÃO ADM -->
-
-      <button
-        id="adminBtn"
-        class="icon-btn hidden"
-        title="Painel do administrador"
-      >
-        ⚙️
-      </button>
-
-
-      <button
-        id="leaveBtn"
-        class="danger"
-      >
-        Sair
-      </button>
-
-    </div>
-
-  </header>
-
-
-
-  <!-- =========================
-       CONTEÚDO
-  ========================= -->
-
-  <div class="room-layout">
-
-
-    <!-- PALCO -->
-
-    <section class="stage">
-
-      <div
-        id="emptyState"
-        class="empty-state"
-      >
-
-        <div class="big-icon">
-          🖥️
+        <div class="brand-logo">
+          <span>H</span>
         </div>
 
-        <h2>
-          Ninguém está compartilhando
-        </h2>
+        <div class="brand-text">
+          <strong>HYPE</strong>
+          <small>ROLEPLAY</small>
+        </div>
 
-        <p>
-          Clique em <b>Compartilhar tela</b>
-          para começar.
-        </p>
+      </div>
+
+      <div class="online-status">
+        <span></span>
+        Sistema online
+      </div>
+
+    </header>
+
+
+    <section class="hero">
+
+      <div class="hero-badge">
+        <span>●</span>
+        COMPARTILHAMENTO ONLINE
+      </div>
+
+      <h1>
+        Compartilhe sua tela
+        <span>com a Hype.</span>
+      </h1>
+
+      <p>
+        Crie uma sala, envie o link para seus amigos
+        e compartilhe tela, áudio e microfone diretamente
+        pelo navegador.
+      </p>
+
+
+      <div class="join-card">
+
+        <div class="field">
+
+          <label for="nameHome">
+            SEU NOME
+          </label>
+
+          <input
+            id="nameHome"
+            type="text"
+            maxlength="30"
+            placeholder="Como você quer aparecer?"
+            autocomplete="name"
+          >
+
+        </div>
+
 
         <button
-          id="shareCenterBtn"
-          class="primary"
+          id="createBtn"
+          class="main-button"
+          type="button"
         >
-          🖥️ Compartilhar tela
+
+          <span class="button-icon">＋</span>
+
+          <span>
+            Criar uma sala
+            <small>Comece agora</small>
+          </span>
+
+          <b>→</b>
+
         </button>
+
+
+        <div class="separator">
+          <span>OU ENTRE EM UMA SALA</span>
+        </div>
+
+
+        <div class="join-line">
+
+          <input
+            id="roomInput"
+            type="text"
+            maxlength="32"
+            placeholder="Código da sala"
+            autocomplete="off"
+          >
+
+          <button
+            id="joinBtn"
+            class="join-button"
+            type="button"
+          >
+            Entrar
+          </button>
+
+        </div>
 
       </div>
 
 
-      <!-- VÍDEOS -->
+      <div class="features">
 
-      <div
-        id="videos"
-        class="videos"
-      ></div>
+        <div class="feature">
+
+          <div class="feature-icon">
+            🖥️
+          </div>
+
+          <div>
+            <strong>Compartilhe sua tela</strong>
+            <span>
+              Tela inteira, janela ou aba.
+            </span>
+          </div>
+
+        </div>
+
+
+        <div class="feature">
+
+          <div class="feature-icon">
+            🔊
+          </div>
+
+          <div>
+            <strong>Áudio e microfone</strong>
+            <span>
+              Converse enquanto transmite.
+            </span>
+          </div>
+
+        </div>
+
+
+        <div class="feature">
+
+          <div class="feature-icon">
+            🔗
+          </div>
+
+          <div>
+            <strong>Entre pelo link</strong>
+            <span>
+              Sem instalar nenhum programa.
+            </span>
+          </div>
+
+        </div>
+
+      </div>
 
     </section>
 
 
+    <footer class="home-footer">
+      HYPE ROLEPLAY • COMPARTILHAMENTO DE TELA
+    </footer>
 
-    <!-- =========================
-         SIDEBAR
-    ========================= -->
-
-    <aside class="sidebar">
+  </main>
 
 
-      <div class="side-head">
 
-        <h3>
-          Pessoas
-        </h3>
+  <!-- =====================================================
+       SALA
+  ====================================================== -->
 
-        <span id="count">
-          0
-        </span>
+  <main id="room" class="room-page hidden">
+
+
+    <!-- ===================================================
+         TOPBAR
+    ==================================================== -->
+
+    <header class="room-header">
+
+      <div class="room-brand">
+
+        <div class="brand-logo small">
+          <span>H</span>
+        </div>
+
+        <div class="brand-text">
+          <strong>HYPE</strong>
+          <small>ROLEPLAY</small>
+        </div>
 
       </div>
 
 
-      <div
-        id="participants"
-        class="participants"
-      ></div>
+      <div class="room-center">
 
+        <div class="room-pill">
 
+          <span class="room-dot"></span>
 
-      <div class="chat-head">
-        Chat
+          <span>SALA</span>
+
+          <b id="roomCode">
+            ------
+          </b>
+
+        </div>
+
       </div>
 
 
-      <div
-        id="chatMessages"
-        class="chat-messages"
-      ></div>
+      <div class="header-actions">
 
-
-      <form
-        id="chatForm"
-        class="chat-form"
-      >
-
-        <input
-          id="chatInput"
-          maxlength="500"
-          placeholder="Digite uma mensagem..."
+        <button
+          id="copyBtn"
+          class="header-button"
+          type="button"
+          title="Copiar convite"
         >
-
-        <button>
-          ➤
+          🔗
+          <span>Convidar</span>
         </button>
 
-      </form>
 
-    </aside>
-
-  </div>
-
-
-
-  <!-- =========================
-       CONTROLES
-  ========================= -->
-
-  <footer class="controls">
-
-    <button
-      id="shareBtn"
-      class="control primary-control"
-    >
-      🖥️ Compartilhar tela
-    </button>
+        <button
+          id="adminBtn"
+          class="header-button admin-button hidden"
+          type="button"
+        >
+          ⚙️
+          <span>Administração</span>
+        </button>
 
 
-    <button
-      id="micBtn"
-      class="control"
-    >
-      🎙️ Microfone
-    </button>
+        <button
+          id="leaveBtn"
+          class="header-button leave-button"
+          type="button"
+        >
+          Sair
+        </button>
 
+      </div>
 
-    <button
-      id="stopShareBtn"
-      class="control hidden"
-    >
-      ⏹️ Parar transmissão
-    </button>
-
-
-    <button
-      id="inviteBtn"
-      class="control"
-    >
-      🔗 Copiar convite
-    </button>
-
-  </footer>
+    </header>
 
 
 
-  <!-- =========================
-       PAINEL ADMINISTRADOR
-  ========================= -->
+    <!-- ===================================================
+         CONTEÚDO PRINCIPAL
+    ==================================================== -->
 
-  <div
-    id="adminOverlay"
-    class="modal-overlay hidden"
-  >
-
-    <div class="admin-panel">
+    <div class="room-content">
 
 
-      <div class="admin-header">
+      <!-- =================================================
+           PALCO
+      ================================================== -->
 
-        <div>
+      <section class="stage">
 
-          <small>
-            ADMINISTRAÇÃO
-          </small>
+        <div
+          id="emptyState"
+          class="empty-state"
+        >
+
+          <div class="empty-icon">
+            🖥️
+          </div>
 
           <h2>
-            Configurações da sala
+            Ninguém está transmitindo
           </h2>
+
+          <p>
+            Seja o primeiro a compartilhar sua tela.
+          </p>
+
+          <button
+            id="shareCenterBtn"
+            class="stage-share-button"
+            type="button"
+          >
+            🖥️ Compartilhar tela
+          </button>
 
         </div>
 
 
-        <button
-          id="closeAdminBtn"
-          class="modal-close"
-        >
-          ✕
-        </button>
-
-      </div>
-
-
-
-      <!-- CONTROLES GERAIS -->
-
-      <section class="admin-section">
-
-        <h3>
-          Controles gerais
-        </h3>
-
-
-        <button
-          id="muteAllBtn"
-          class="admin-action"
-        >
-          <span>🔇</span>
-
-          <div>
-            <strong>
-              Mutar todos
-            </strong>
-
-            <small>
-              Desativa o microfone dos participantes.
-            </small>
-          </div>
-
-        </button>
-
-
-        <button
-          id="unmuteAllBtn"
-          class="admin-action"
-        >
-          <span>🔊</span>
-
-          <div>
-            <strong>
-              Desmutar todos
-            </strong>
-
-            <small>
-              Permite que os participantes usem o microfone.
-            </small>
-          </div>
-
-        </button>
-
-
-        <button
-          id="micPermissionBtn"
-          class="admin-action"
-        >
-          <span>🎙️</span>
-
-          <div>
-            <strong>
-              Microfones
-            </strong>
-
-            <small id="micPermissionText">
-              Permitidos
-            </small>
-          </div>
-
-        </button>
-
-
-        <button
-          id="sharingPermissionBtn"
-          class="admin-action"
-        >
-          <span>🖥️</span>
-
-          <div>
-            <strong>
-              Compartilhamento
-            </strong>
-
-            <small id="sharingPermissionText">
-              Participantes podem transmitir
-            </small>
-          </div>
-
-        </button>
-
-      </section>
-
-
-
-      <!-- PARTICIPANTES -->
-
-      <section class="admin-section">
-
-        <h3>
-          Participantes
-        </h3>
-
         <div
-          id="adminParticipants"
-          class="admin-participants"
+          id="videos"
+          class="videos"
         ></div>
 
       </section>
 
 
 
-      <!-- SENHA -->
+      <!-- =================================================
+           SIDEBAR
+      ================================================== -->
 
-      <section class="admin-section">
-
-        <h3>
-          Segurança da sala
-        </h3>
+      <aside class="sidebar">
 
 
-        <div class="password-row">
+        <div class="sidebar-header">
 
-          <input
-            id="roomPassword"
-            type="password"
-            maxlength="32"
-            placeholder="Nova senha da sala"
+          <div>
+
+            <strong>
+              Participantes
+            </strong>
+
+            <small>
+              Pessoas na sala
+            </small>
+
+          </div>
+
+          <span
+            id="count"
+            class="people-count"
           >
+            0
+          </span>
+
+        </div>
+
+
+        <div
+          id="participants"
+          class="participants"
+        ></div>
+
+
+
+        <!-- CHAT -->
+
+        <div class="chat-section">
+
+          <div class="chat-title">
+
+            <span>💬</span>
+
+            <strong>
+              Chat
+            </strong>
+
+          </div>
+
+
+          <div
+            id="chatMessages"
+            class="chat-messages"
+          ></div>
+
+
+          <form
+            id="chatForm"
+            class="chat-form"
+          >
+
+            <input
+              id="chatInput"
+              type="text"
+              maxlength="500"
+              placeholder="Digite uma mensagem..."
+              autocomplete="off"
+            >
+
+            <button type="submit">
+              ➤
+            </button>
+
+          </form>
+
+        </div>
+
+      </aside>
+
+    </div>
+
+
+
+    <!-- ===================================================
+         CONTROLES
+    ==================================================== -->
+
+    <footer class="controls">
+
+      <div class="controls-left">
+
+        <button
+          id="shareBtn"
+          class="control-button share-control"
+          type="button"
+        >
+
+          <span>🖥️</span>
+
+          <div>
+            <strong>Compartilhar</strong>
+            <small>Tela e áudio</small>
+          </div>
+
+        </button>
+
+
+        <button
+          id="stopShareBtn"
+          class="control-button stop-control hidden"
+          type="button"
+        >
+
+          <span>⏹️</span>
+
+          <div>
+            <strong>Parar transmissão</strong>
+            <small>Encerrar tela</small>
+          </div>
+
+        </button>
+
+
+        <button
+          id="micBtn"
+          class="control-button"
+          type="button"
+        >
+
+          <span>🎙️</span>
+
+          <div>
+            <strong>Microfone</strong>
+            <small>Desligado</small>
+          </div>
+
+        </button>
+
+
+        <button
+          id="inviteBtn"
+          class="control-button"
+          type="button"
+        >
+
+          <span>🔗</span>
+
+          <div>
+            <strong>Convidar</strong>
+            <small>Copiar link</small>
+          </div>
+
+        </button>
+
+      </div>
+
+
+      <div class="connection-info">
+
+        <span
+          id="roomStatusDot"
+          class="connection-dot"
+        ></span>
+
+        <span id="roomStatus">
+          Conectando...
+        </span>
+
+      </div>
+
+    </footer>
+
+
+
+    <!-- ===================================================
+         PAINEL ADMINISTRADOR
+    ==================================================== -->
+
+    <div
+      id="adminOverlay"
+      class="admin-overlay hidden"
+    >
+
+      <div class="admin-panel">
+
+
+        <div class="admin-header">
+
+          <div>
+
+            <div class="admin-title">
+              ⚙️ Administração
+            </div>
+
+            <small>
+              Controle da sala
+            </small>
+
+          </div>
+
 
           <button
-            id="savePasswordBtn"
-            class="primary"
+            id="closeAdminBtn"
+            class="close-admin"
+            type="button"
           >
-            Salvar
+            ×
           </button>
 
         </div>
 
-        <small class="admin-help">
-          Deixe vazio para remover a senha.
-        </small>
 
-      </section>
+
+        <!-- SENHA -->
+
+        <section class="admin-section">
+
+          <div class="admin-section-title">
+
+            <div>
+              🔐
+            </div>
+
+            <div>
+              <strong>
+                Senha da sala
+              </strong>
+
+              <small>
+                Proteja sua sala
+              </small>
+            </div>
+
+          </div>
+
+
+          <div class="password-row">
+
+            <input
+              id="roomPassword"
+              type="password"
+              maxlength="50"
+              placeholder="Digite uma senha"
+              autocomplete="new-password"
+            >
+
+            <button
+              id="savePasswordBtn"
+              type="button"
+            >
+              Salvar
+            </button>
+
+          </div>
+
+
+          <button
+            id="removePasswordBtn"
+            class="text-danger-button"
+            type="button"
+          >
+            Remover senha
+          </button>
+
+        </section>
+
+
+
+        <!-- MICROFONES -->
+
+        <section class="admin-section">
+
+          <div class="admin-section-title">
+
+            <div>
+              🎙️
+            </div>
+
+            <div>
+              <strong>
+                Microfones
+              </strong>
+
+              <small>
+                Controle os microfones da sala
+              </small>
+            </div>
+
+          </div>
+
+
+          <button
+            id="muteAllBtn"
+            class="admin-action"
+            type="button"
+          >
+
+            <span>
+              🔇
+            </span>
+
+            <div>
+              <strong>
+                Mutar todos
+              </strong>
+
+              <small>
+                Desativar os microfones
+              </small>
+            </div>
+
+          </button>
+
+
+          <button
+            id="unmuteAllBtn"
+            class="admin-action"
+            type="button"
+          >
+
+            <span>
+              🔊
+            </span>
+
+            <div>
+              <strong>
+                Liberar todos
+              </strong>
+
+              <small>
+                Permitir microfones novamente
+              </small>
+            </div>
+
+          </button>
+
+        </section>
+
+
+
+        <!-- PARTICIPANTES -->
+
+        <section class="admin-section participants-admin">
+
+          <div class="admin-section-title">
+
+            <div>
+              👥
+            </div>
+
+            <div>
+              <strong>
+                Participantes
+              </strong>
+
+              <small>
+                Gerencie quem está na sala
+              </small>
+            </div>
+
+          </div>
+
+
+          <div
+            id="adminParticipants"
+            class="admin-participants"
+          ></div>
+
+        </section>
+
+
+      </div>
 
     </div>
 
-  </div>
 
 
-</main>
+    <!-- ===================================================
+         MODAL SENHA
+    ==================================================== -->
+
+    <div
+      id="passwordOverlay"
+      class="password-overlay hidden"
+    >
+
+      <div class="password-modal">
+
+        <div class="password-icon">
+          🔐
+        </div>
+
+        <h2>
+          Sala protegida
+        </h2>
+
+        <p>
+          Digite a senha para entrar nesta sala.
+        </p>
+
+        <input
+          id="passwordInput"
+          type="password"
+          maxlength="50"
+          placeholder="Senha da sala"
+          autocomplete="off"
+        >
+
+        <button
+          id="passwordJoinBtn"
+          class="main-button"
+          type="button"
+        >
+          Entrar na sala
+        </button>
+
+      </div>
+
+    </div>
+
+  </main>
 
 
-<script src="/app.js"></script>
+  <script src="/app.js"></script>
 
 </body>
 </html>
