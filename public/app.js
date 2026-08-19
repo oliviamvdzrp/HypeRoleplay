@@ -7,10 +7,11 @@ let myId = null;
 let myName = "";
 let socket = null;
 
+let isAdmin = false;
+let deviceType = "desktop";
+
 let sharing = false;
 let micOn = false;
-let mutedByAdmin = false;
-let isHost = false;
 
 let localScreen = null;
 let localMic = null;
@@ -21,6 +22,7 @@ const iceServers = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun.cloudflare.com:3478" }
 ];
+
 
 /* =========================================================
    UTILIDADES
@@ -38,8 +40,9 @@ function toast(text) {
 
   window.__toast = setTimeout(() => {
     el.classList.remove("show");
-  }, 3000);
+  }, 2800);
 }
+
 
 function randomRoom() {
   return Math.random()
@@ -48,6 +51,7 @@ function randomRoom() {
     .toUpperCase();
 }
 
+
 function normalizeRoom(value) {
   return String(value || "")
     .trim()
@@ -55,58 +59,86 @@ function normalizeRoom(value) {
     .slice(0, 32);
 }
 
+
 function escapeHtml(value) {
   return String(value).replace(
     /[&<>"']/g,
-    (char) =>
-      ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#039;"
-      })[char]
+    char => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#039;"
+    }[char])
   );
 }
 
+
 /* =========================================================
-   WEBSOCKET
+   DETECTAR CELULAR
 ========================================================= */
 
-function connect(password = "") {
+function detectDevice() {
+  const ua = navigator.userAgent.toLowerCase();
+
+  if (
+    /android|iphone|ipad|ipod|mobile/.test(ua)
+  ) {
+    return "mobile";
+  }
+
+  return "desktop";
+}
+
+
+/* =========================================================
+   CONEXÃO
+========================================================= */
+
+function connect() {
+
   const protocol =
-    location.protocol === "https:" ? "wss" : "ws";
+    location.protocol === "https:"
+      ? "wss"
+      : "ws";
 
   socket = new WebSocket(
     `${protocol}://${location.host}`
   );
 
+
   socket.onopen = () => {
-    socket.send(
-      JSON.stringify({
-        type: "join",
-        room: roomId,
-        name: myName,
-        password
-      })
-    );
+
+    socket.send(JSON.stringify({
+      type: "join",
+      room: roomId,
+      name: myName,
+      userAgent: navigator.userAgent
+    }));
 
     if ($("#roomStatus")) {
       $("#roomStatus").textContent = "Conectado";
     }
   };
 
+
   socket.onclose = () => {
+
     if ($("#roomStatus")) {
       $("#roomStatus").textContent = "Desconectado";
     }
+
+    toast("A conexão com a sala foi encerrada.");
   };
+
 
   socket.onerror = () => {
-    toast("Erro na conexão com o servidor.");
+    toast("Não foi possível conectar ao servidor.");
   };
 
-  socket.onmessage = async (event) => {
+
+  socket.onmessage = async event => {
+
     let msg;
 
     try {
@@ -115,42 +147,58 @@ function connect(password = "") {
       return;
     }
 
+
     /* ERRO */
+
     if (msg.type === "error") {
       toast(msg.message);
       return;
     }
 
-    /* SENHA */
-    if (msg.type === "password-required") {
-      showPasswordModal();
-      return;
-    }
 
     /* ENTROU */
-    if (msg.type === "joined") {
-      myId = msg.peerId;
 
-      isHost = msg.host === myId;
+    if (msg.type === "joined") {
+
+      myId = msg.peerId;
+      isAdmin = !!msg.isAdmin;
+
+      deviceType =
+        msg.canShare === false
+          ? "mobile"
+          : "desktop";
+
 
       if ($("#roomCode")) {
         $("#roomCode").textContent = msg.room;
       }
 
-      renderParticipants(msg.participants || []);
+
+      renderParticipants(msg.participants);
 
       updateAdminInterface();
 
-      if (msg.mutedAll) {
-        mutedByAdmin = true;
-      }
 
       /*
-       * IMPORTANTE:
-       * O participante novo cria conexão com os existentes.
+       * CELULAR NÃO INICIA WEBRTC
+       * apenas recebe.
        */
-      for (const participant of msg.participants || []) {
-        if (participant.peerId === myId) continue;
+
+      if (deviceType === "mobile") {
+        toast("Você entrou como espectador.");
+        return;
+      }
+
+
+      /*
+       * PC cria conexão com quem já estava.
+       */
+
+      for (const participant of msg.participants) {
+
+        if (participant.peerId === myId) {
+          continue;
+        }
 
         const pc = createPeer(
           participant.peerId,
@@ -159,159 +207,223 @@ function connect(password = "") {
         );
 
         try {
-          const offer = await pc.createOffer();
+
+          const offer =
+            await pc.createOffer();
 
           await pc.setLocalDescription(offer);
 
-          sendSignal(participant.peerId, {
-            sdp: pc.localDescription
-          });
+          sendSignal(
+            participant.peerId,
+            {
+              sdp: pc.localDescription
+            }
+          );
+
         } catch (error) {
-          console.error("Erro criando oferta:", error);
+
+          console.error(
+            "Erro criando oferta:",
+            error
+          );
         }
       }
 
       return;
     }
 
+
     /* NOVO PARTICIPANTE */
+
     if (msg.type === "participant-joined") {
+
       addParticipant(msg.participant);
+
       return;
     }
+
+
+    /* LISTA COMPLETA */
+
+    if (msg.type === "participants") {
+
+      renderParticipants(msg.participants);
+
+      return;
+    }
+
 
     /* PARTICIPANTE ATUALIZADO */
+
     if (msg.type === "participant-updated") {
+
       updateParticipant(msg.participant);
+
       return;
     }
+
 
     /* PARTICIPANTE SAIU */
+
     if (msg.type === "participant-left") {
+
       removePeer(msg.peerId);
-      return;
-    }
-
-    /* TROCA DE HOST */
-    if (msg.type === "host-changed") {
-      isHost = msg.peerId === myId;
-
-      updateAdminInterface();
-
-      if (isHost) {
-        toast("Você agora é o administrador da sala.");
-      }
 
       return;
     }
 
-    /* MUTAR TODOS */
-    if (msg.type === "mute-all") {
-      mutedByAdmin = !!msg.value;
-
-      if (mutedByAdmin) {
-        disableMyMicrophone();
-
-        toast(
-          "O administrador mutou os microfones da sala."
-        );
-      } else {
-        toast(
-          "O administrador liberou os microfones."
-        );
-      }
-
-      updateMicButton();
-
-      return;
-    }
 
     /* WEBRTC */
+
     if (msg.type === "signal") {
+
       await handleSignal(msg);
+
       return;
     }
 
+
     /* CHAT */
+
     if (msg.type === "chat") {
+
       addChat(
         msg.from,
         msg.text,
         msg.peerId === myId
       );
+
+      return;
+    }
+
+
+    /* EXPULSO */
+
+    if (msg.type === "kicked") {
+
+      toast(msg.message);
+
+      setTimeout(() => {
+        location.href = location.pathname;
+      }, 1200);
+
+      return;
+    }
+
+
+    if (msg.type === "force-disconnect") {
+
+      try {
+        socket.close();
+      } catch {}
+
+      location.href = location.pathname;
+
+      return;
+    }
+
+
+    /* ADM PROMOVIDO */
+
+    if (msg.type === "admin-promoted") {
+
+      isAdmin = true;
+
+      updateAdminInterface();
+
+      toast("Você agora é o administrador da sala.");
+
+      return;
+    }
+
+
+    /* ADM MANDOU ALTERAR MICROFONE */
+
+    if (msg.type === "force-mic") {
+
+      const value = !!msg.value;
+
+      if (value) {
+        await enableMic();
+      } else {
+        disableMic();
+      }
+
+      return;
     }
   };
 }
 
+
 /* =========================================================
-   SINALIZAÇÃO WEBRTC
+   SIGNALING
 ========================================================= */
 
 function sendSignal(to, signal) {
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
+
+  if (!socket || socket.readyState !== 1) {
     return;
   }
 
-  socket.send(
-    JSON.stringify({
-      type: "signal",
-      to,
-      signal
-    })
-  );
+  socket.send(JSON.stringify({
+    type: "signal",
+    to,
+    signal
+  }));
 }
+
 
 function createPeer(
   peerId,
   name,
   initiator = false
 ) {
+
   if (peers.has(peerId)) {
     return peers.get(peerId).pc;
   }
+
 
   const pc = new RTCPeerConnection({
     iceServers
   });
 
+
   const state = {
     pc,
     name,
     stream: null,
-    candidateQueue: [],
-    remoteVideo: null
+    candidateQueue: []
   };
+
 
   peers.set(peerId, state);
 
-  /* ICE */
-  pc.onicecandidate = (event) => {
+
+  pc.onicecandidate = event => {
+
     if (event.candidate) {
-      sendSignal(peerId, {
-        candidate: event.candidate
-      });
+
+      sendSignal(
+        peerId,
+        {
+          candidate: event.candidate
+        }
+      );
     }
   };
 
-  /* RECEBE ÁUDIO/VÍDEO */
-  pc.ontrack = (event) => {
-    let stream = state.stream;
+
+  pc.ontrack = event => {
+
+    const stream =
+      event.streams[0];
 
     if (!stream) {
-      stream = new MediaStream();
-      state.stream = stream;
+      return;
     }
 
-    /*
-     * Evita adicionar a mesma track duas vezes.
-     */
-    if (
-      !stream.getTracks().some(
-        (track) => track.id === event.track.id
-      )
-    ) {
-      stream.addTrack(event.track);
-    }
+    state.stream = stream;
 
     attachRemote(
       peerId,
@@ -322,98 +434,130 @@ function createPeer(
     hideEmpty();
   };
 
+
   pc.onconnectionstatechange = () => {
-    const stateName = pc.connectionState;
+
+    const stateName =
+      pc.connectionState;
 
     if (
-      stateName === "failed" ||
-      stateName === "disconnected"
+      stateName === "failed"
     ) {
-      console.warn(
-        `Conexão com ${name}: ${stateName}`
-      );
+
+      try {
+        pc.restartIce();
+      } catch {}
     }
 
-    if (stateName === "closed") {
-      removePeer(peerId);
+
+    if (
+      stateName === "closed" ||
+      stateName === "disconnected"
+    ) {
+
+      setTimeout(() => {
+
+        if (
+          pc.connectionState ===
+          "disconnected"
+        ) {
+          removePeer(peerId);
+        }
+
+      }, 4000);
     }
   };
 
+
   /*
-   * Se eu já estiver transmitindo,
-   * adiciona minha tela para o novo participante.
+   * ADICIONAR TELA LOCAL
    */
+
   if (localScreen) {
-    for (const track of localScreen.getTracks()) {
-      pc.addTrack(track, localScreen);
+
+    for (
+      const track
+      of localScreen.getTracks()
+    ) {
+
+      pc.addTrack(
+        track,
+        localScreen
+      );
     }
   }
 
+
   /*
-   * Se meu microfone estiver ligado,
-   * adiciona o áudio para o novo participante.
+   * ADICIONAR MICROFONE
    */
-  if (localMic && micOn && !mutedByAdmin) {
-    pc.addTrack(localMic, localMicStream());
+
+  if (localMic) {
+
+    for (
+      const track
+      of localMic.getTracks()
+    ) {
+
+      pc.addTrack(
+        track,
+        localMic
+      );
+    }
   }
+
 
   return pc;
 }
 
-function localMicStream() {
-  if (!localMic) {
-    return new MediaStream();
-  }
-
-  return new MediaStream([localMic]);
-}
 
 /* =========================================================
    WEBRTC SIGNAL
 ========================================================= */
 
 async function handleSignal(msg) {
+
   const {
     from,
     fromName,
     signal
   } = msg;
 
+
   const pc = createPeer(
     from,
-    fromName || "Participante",
+    fromName,
     false
   );
 
-  const state = peers.get(from);
 
-  if (!state) return;
+  const state =
+    peers.get(from);
+
 
   try {
+
     if (signal.sdp) {
+
       await pc.setRemoteDescription(
         signal.sdp
       );
 
+
       while (
         state.candidateQueue.length
       ) {
-        const candidate =
-          state.candidateQueue.shift();
 
-        try {
-          await pc.addIceCandidate(candidate);
-        } catch (error) {
-          console.warn(
-            "Erro adicionando ICE:",
-            error
-          );
-        }
+        await pc.addIceCandidate(
+          state.candidateQueue.shift()
+        );
       }
+
 
       if (
         signal.sdp.type === "offer"
       ) {
+
         const answer =
           await pc.createAnswer();
 
@@ -421,24 +565,39 @@ async function handleSignal(msg) {
           answer
         );
 
-        sendSignal(from, {
-          sdp: pc.localDescription
-        });
+        sendSignal(
+          from,
+          {
+            sdp:
+              pc.localDescription
+          }
+        );
       }
+
+      return;
     }
 
+
     if (signal.candidate) {
-      if (pc.remoteDescription) {
+
+      if (
+        pc.remoteDescription
+      ) {
+
         await pc.addIceCandidate(
           signal.candidate
         );
+
       } else {
+
         state.candidateQueue.push(
           signal.candidate
         );
       }
     }
+
   } catch (error) {
+
     console.error(
       "Erro WebRTC:",
       error
@@ -446,8 +605,9 @@ async function handleSignal(msg) {
   }
 }
 
+
 /* =========================================================
-   VÍDEO REMOTO
+   VÍDEOS
 ========================================================= */
 
 function attachRemote(
@@ -455,17 +615,23 @@ function attachRemote(
   name,
   stream
 ) {
-  let card = document.querySelector(
-    `[data-peer="${peerId}"]`
-  );
+
+  let card =
+    document.querySelector(
+      `[data-peer="${peerId}"]`
+    );
+
 
   if (!card) {
+
     card =
       document.createElement("div");
 
-    card.className = "video-card";
+    card.className =
+      "video-card";
 
-    card.dataset.peer = peerId;
+    card.dataset.peer =
+      peerId;
 
     card.innerHTML = `
       <video
@@ -474,466 +640,170 @@ function attachRemote(
         controls
       ></video>
 
-      <div class="video-name">
-        ${escapeHtml(name)}
-      </div>
+      <div class="video-name"></div>
     `;
 
-    $("#videos")?.appendChild(card);
+    $("#videos")
+      ?.appendChild(card);
   }
+
 
   const video =
     card.querySelector("video");
 
-  if (video) {
-    if (video.srcObject !== stream) {
-      video.srcObject = stream;
-    }
-
-    /*
-     * O navegador pode bloquear autoplay
-     * com áudio. Tentamos tocar.
-     */
-    video.play().catch(() => {
-      const playButton =
-        document.createElement("button");
-
-      playButton.textContent =
-        "🔊 Ativar áudio";
-
-      playButton.className =
-        "video-audio-button";
-
-      playButton.onclick = () => {
-        video.muted = false;
-
-        video
-          .play()
-          .catch(() => {});
-
-        playButton.remove();
-      };
-
-      if (
-        !card.querySelector(
-          ".video-audio-button"
-        )
-      ) {
-        card.appendChild(
-          playButton
-        );
-      }
-    });
-  }
-
-  stateFor(peerId).remoteVideo =
-    video;
-}
-
-function stateFor(peerId) {
-  return peers.get(peerId) || {};
-}
-
-/* =========================================================
-   REMOVER PARTICIPANTE
-========================================================= */
-
-function removePeer(peerId) {
-  const state = peers.get(peerId);
-
-  if (state) {
-    try {
-      state.pc.close();
-    } catch {}
-
-    peers.delete(peerId);
-  }
-
-  document
-    .querySelector(
-      `[data-peer="${peerId}"]`
-    )
-    ?.remove();
-
-  document
-    .querySelector(
-      `[data-participant="${peerId}"]`
-    )
-    ?.remove();
-
-  renderParticipantsFromDOM();
 
   if (
-    $("#videos") &&
-    !$("#videos").children.length
+    video.srcObject !== stream
   ) {
-    showEmpty();
+
+    video.srcObject = stream;
+  }
+
+
+  video.play().catch(() => {});
+
+
+  const nameEl =
+    card.querySelector(
+      ".video-name"
+    );
+
+
+  if (nameEl) {
+
+    nameEl.textContent =
+      `${name} · transmitindo`;
   }
 }
+
 
 /* =========================================================
    COMPARTILHAR TELA
 ========================================================= */
 
 async function startShare() {
+
+  /*
+   * CELULAR NÃO TRANSMITE
+   */
+
+  if (deviceType === "mobile") {
+
+    toast(
+      "No celular você pode apenas assistir."
+    );
+
+    return;
+  }
+
+
   if (
-    !navigator.mediaDevices ||
-    !navigator.mediaDevices.getDisplayMedia
+    !navigator.mediaDevices?.getDisplayMedia
   ) {
+
     toast(
-      "Seu navegador não permite compartilhamento de tela."
+      "Seu navegador não suporta compartilhamento de tela."
     );
 
     return;
   }
 
-  if (sharing) {
-    toast(
-      "Você já está transmitindo."
-    );
-
-    return;
-  }
 
   try {
-    /*
-     * AUDIO TRUE:
-     * permite áudio de aba/janela/tela
-     * quando o navegador disponibilizar.
-     */
+
     localScreen =
-      await navigator.mediaDevices.getDisplayMedia(
-        {
-          video: {
-            cursor: "always",
-            frameRate: {
-              ideal: 30,
-              max: 60
-            }
-          },
+      await navigator.mediaDevices.getDisplayMedia({
 
-          audio: {
-            echoCancellation: false,
-            noiseSuppression: false,
-            autoGainControl: false
+        video: {
+          cursor: "always",
+          frameRate: {
+            ideal: 30,
+            max: 60
           }
-        }
-      );
+        },
 
-    const videoTrack =
-      localScreen.getVideoTracks()[0];
+        /*
+         * O navegador mostra a opção
+         * de áudio da tela/janela.
+         */
+        audio: true
+      });
 
-    if (!videoTrack) {
-      throw new Error(
-        "Nenhum vídeo foi selecionado."
-      );
-    }
 
     sharing = true;
 
-    /*
-     * MOSTRA A PRÓPRIA TELA
-     */
-    attachLocalScreen();
-
-    hideEmpty();
 
     updateShareButtons();
 
+
     /*
-     * Envia a tela para TODOS.
+     * Para cada participante
      */
-    for (const [
-      peerId,
-      state
-    ] of peers) {
-      const pc = state.pc;
+
+    for (
+      const [peerId, state]
+      of peers
+    ) {
+
+      const videoTrack =
+        localScreen
+          .getVideoTracks()[0];
+
 
       const videoSender =
-        pc.getSenders().find(
-          (sender) =>
-            sender.track?.kind === "video"
-        );
-
-      if (videoSender) {
-        await videoSender.replaceTrack(
-          videoTrack
-        );
-      } else {
-        for (
-          const track of localScreen.getTracks()
-        ) {
-          pc.addTrack(
-            track,
-            localScreen
-          );
-        }
-
-        const offer =
-          await pc.createOffer();
-
-        await pc.setLocalDescription(
-          offer
-        );
-
-        sendSignal(peerId, {
-          sdp: pc.localDescription
-        });
-      }
-    }
-
-    /*
-     * Se o usuário compartilhar
-     * áudio da tela, envia junto.
-     */
-    const audioTrack =
-      localScreen.getAudioTracks()[0];
-
-    if (audioTrack) {
-      for (const [
-        peerId,
-        state
-      ] of peers) {
-        const audioSender =
-          state.pc
-            .getSenders()
-            .find(
-              (sender) =>
-                sender.track?.kind === "audio"
-            );
-
-        if (audioSender) {
-          await audioSender.replaceTrack(
-            audioTrack
-          );
-        }
-      }
-
-      toast(
-        "Tela compartilhada com áudio."
-      );
-    } else {
-      toast(
-        "Tela compartilhada. O navegador não disponibilizou áudio dessa fonte."
-      );
-    }
-
-    videoTrack.onended = () => {
-      stopShare();
-    };
-
-    socket?.send(
-      JSON.stringify({
-        type: "sharing",
-        value: true
-      })
-    );
-  } catch (error) {
-    console.error(
-      "Compartilhamento:",
-      error
-    );
-
-    if (
-      error.name !== "AbortError" &&
-      error.name !== "NotAllowedError"
-    ) {
-      toast(
-        "Não foi possível compartilhar a tela."
-      );
-    }
-  }
-}
-
-/* =========================================================
-   MOSTRAR MINHA PRÓPRIA TELA
-========================================================= */
-
-function attachLocalScreen() {
-  if (!localScreen) return;
-
-  let card =
-    document.querySelector(
-      '[data-peer="local"]'
-    );
-
-  if (!card) {
-    card =
-      document.createElement("div");
-
-    card.className =
-      "video-card local-video";
-
-    card.dataset.peer = "local";
-
-    card.innerHTML = `
-      <video
-        autoplay
-        muted
-        playsinline
-      ></video>
-
-      <div class="video-name">
-        Você · transmitindo
-      </div>
-    `;
-
-    $("#videos")?.appendChild(card);
-  }
-
-  const video =
-    card.querySelector("video");
-
-  video.srcObject = localScreen;
-
-  video.muted = true;
-
-  video.play().catch(() => {});
-}
-
-/* =========================================================
-   PARAR TELA
-========================================================= */
-
-function stopShare() {
-  if (!localScreen) return;
-
-  try {
-    localScreen
-      .getTracks()
-      .forEach((track) => {
-        track.stop();
-      });
-  } catch {}
-
-  localScreen = null;
-
-  sharing = false;
-
-  document
-    .querySelector(
-      '[data-peer="local"]'
-    )
-    ?.remove();
-
-  for (const state of peers.values()) {
-    const videoSender =
-      state.pc
-        .getSenders()
-        .find(
-          (sender) =>
-            sender.track?.kind === "video"
-        );
-
-    if (videoSender) {
-      videoSender
-        .replaceTrack(null)
-        .catch(() => {});
-    }
-
-    const audioSender =
-      state.pc
-        .getSenders()
-        .find(
-          (sender) =>
-            sender.track?.kind === "audio"
-        );
-
-    /*
-     * O áudio da tela também para.
-     */
-    if (
-      audioSender &&
-      !micOn
-    ) {
-      audioSender
-        .replaceTrack(null)
-        .catch(() => {});
-    }
-  }
-
-  socket?.send(
-    JSON.stringify({
-      type: "sharing",
-      value: false
-    })
-  );
-
-  updateShareButtons();
-
-  if (
-    $("#videos") &&
-    !$("#videos").children.length
-  ) {
-    showEmpty();
-  }
-
-  toast(
-    "Transmissão encerrada."
-  );
-}
-
-/* =========================================================
-   MICROFONE
-========================================================= */
-
-async function toggleMic() {
-  if (mutedByAdmin) {
-    toast(
-      "O administrador desativou os microfones."
-    );
-
-    return;
-  }
-
-  if (!micOn) {
-    await enableMicrophone();
-  } else {
-    disableMyMicrophone();
-  }
-}
-
-async function enableMicrophone() {
-  try {
-    const stream =
-      await navigator.mediaDevices.getUserMedia(
-        {
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-          }
-        }
-      );
-
-    localMic =
-      stream.getAudioTracks()[0];
-
-    localMic.enabled = true;
-
-    micOn = true;
-
-    for (const [
-      peerId,
-      state
-    ] of peers) {
-      const sender =
         state.pc
           .getSenders()
           .find(
-            (s) =>
-              s.track?.kind === "audio"
+            sender =>
+              sender.track?.kind ===
+              "video"
           );
 
-      if (sender) {
-        await sender.replaceTrack(
-          localMic
-        );
+
+      if (videoSender) {
+
+        await videoSender
+          .replaceTrack(
+            videoTrack
+          );
+
       } else {
+
         state.pc.addTrack(
-          localMic,
-          stream
+          videoTrack,
+          localScreen
         );
+
+
+        /*
+         * Áudio da tela
+         */
+
+        for (
+          const audioTrack
+          of localScreen
+            .getAudioTracks()
+        ) {
+
+          const audioSender =
+            state.pc
+              .getSenders()
+              .find(
+                sender =>
+                  sender.track?.kind ===
+                  "audio"
+              );
+
+
+          if (!audioSender) {
+
+            state.pc.addTrack(
+              audioTrack,
+              localScreen
+            );
+          }
+        }
+
 
         const offer =
           await state.pc.createOffer();
@@ -942,25 +812,225 @@ async function enableMicrophone() {
           offer
         );
 
-        sendSignal(peerId, {
-          sdp: state.pc.localDescription
-        });
+        sendSignal(
+          peerId,
+          {
+            sdp:
+              state.pc.localDescription
+          }
+        );
       }
     }
 
+
+    const screenTrack =
+      localScreen
+        .getVideoTracks()[0];
+
+
+    if (screenTrack) {
+
+      screenTrack.onended =
+        stopShare;
+    }
+
+
     socket?.send(
       JSON.stringify({
-        type: "mute",
-        value: false
+        type: "sharing",
+        value: true
       })
     );
 
-    updateMicButton();
+
+    updateParticipant({
+      peerId: myId,
+      name: myName,
+      sharing: true,
+      micOn,
+      isAdmin,
+      device: deviceType
+    });
+
 
     toast(
-      "Microfone ligado."
+      "Sua tela está sendo transmitida."
     );
+
   } catch (error) {
+
+    console.error(error);
+
+    if (
+      error.name !==
+        "AbortError" &&
+      error.name !==
+        "NotAllowedError"
+    ) {
+
+      toast(
+        "Não foi possível iniciar a transmissão."
+      );
+    }
+  }
+}
+
+
+function stopShare() {
+
+  if (!localScreen) {
+    return;
+  }
+
+
+  localScreen
+    .getTracks()
+    .forEach(
+      track => track.stop()
+    );
+
+
+  localScreen = null;
+  sharing = false;
+
+
+  updateShareButtons();
+
+
+  socket?.send(
+    JSON.stringify({
+      type: "sharing",
+      value: false
+    })
+  );
+
+
+  for (
+    const state
+    of peers.values()
+  ) {
+
+    const videoSender =
+      state.pc
+        .getSenders()
+        .find(
+          sender =>
+            sender.track?.kind ===
+            "video"
+        );
+
+
+    if (videoSender) {
+
+      videoSender
+        .replaceTrack(null)
+        .catch(() => {});
+    }
+  }
+
+
+  toast(
+    "Transmissão encerrada."
+  );
+}
+
+
+/* =========================================================
+   MICROFONE
+========================================================= */
+
+async function enableMic() {
+
+  try {
+
+    if (!localMic) {
+
+      localMic =
+        await navigator.mediaDevices
+          .getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true
+            }
+          });
+    }
+
+
+    const track =
+      localMic
+        .getAudioTracks()[0];
+
+
+    if (!track) {
+      return;
+    }
+
+
+    track.enabled = true;
+    micOn = true;
+
+
+    for (
+      const [peerId, state]
+      of peers
+    ) {
+
+      const sender =
+        state.pc
+          .getSenders()
+          .find(
+            s =>
+              s.track?.kind ===
+              "audio"
+          );
+
+
+      if (sender) {
+
+        await sender.replaceTrack(
+          track
+        );
+
+      } else {
+
+        state.pc.addTrack(
+          track,
+          localMic
+        );
+
+
+        const offer =
+          await state.pc.createOffer();
+
+        await state.pc.setLocalDescription(
+          offer
+        );
+
+
+        sendSignal(
+          peerId,
+          {
+            sdp:
+              state.pc.localDescription
+          }
+        );
+      }
+    }
+
+
+    updateMicButton();
+
+
+    socket?.send(
+      JSON.stringify({
+        type: "mic",
+        value: true
+      })
+    );
+
+  } catch (error) {
+
     console.error(error);
 
     toast(
@@ -969,176 +1039,245 @@ async function enableMicrophone() {
   }
 }
 
-function disableMyMicrophone() {
+
+function disableMic() {
+
   micOn = false;
 
-  if (localMic) {
-    try {
-      localMic.stop();
-    } catch {}
 
-    localMic = null;
+  if (localMic) {
+
+    localMic
+      .getAudioTracks()
+      .forEach(
+        track =>
+          track.enabled = false
+      );
   }
 
-  for (const state of peers.values()) {
+
+  for (
+    const state
+    of peers.values()
+  ) {
+
     const sender =
       state.pc
         .getSenders()
         .find(
-          (s) =>
-            s.track?.kind === "audio"
+          s =>
+            s.track?.kind ===
+            "audio"
         );
 
+
     if (sender) {
+
       sender
         .replaceTrack(null)
         .catch(() => {});
     }
   }
 
-  socket?.send(
-    JSON.stringify({
-      type: "mute",
-      value: true
-    })
-  );
 
   updateMicButton();
+
+
+  socket?.send(
+    JSON.stringify({
+      type: "mic",
+      value: false
+    })
+  );
 }
 
-function updateMicButton() {
-  const button = $("#micBtn");
 
-  if (!button) return;
+async function toggleMic() {
 
-  if (mutedByAdmin) {
-    button.innerHTML =
-      "<span>🔇</span> Microfone bloqueado";
+  if (deviceType === "mobile") {
 
-    return;
-  }
-
-  if (micOn) {
-    button.innerHTML =
-      "<span>🎙️</span> Microfone ligado";
-  } else {
-    button.innerHTML =
-      "<span>🎙️</span> Microfone";
-  }
-}
-
-/* =========================================================
-   ADMINISTRADOR
-========================================================= */
-
-function updateAdminInterface() {
-  let menu =
-    $("#adminPanel");
-
-  /*
-   * Se não existe no HTML,
-   * criamos automaticamente.
-   */
-  if (!menu && isHost) {
-    createAdminPanel();
-  }
-
-  if (!isHost) {
-    $("#adminPanel")
-      ?.classList.add("hidden");
-
-    return;
-  }
-
-  $("#adminPanel")
-    ?.classList.remove("hidden");
-}
-
-function createAdminPanel() {
-  const panel =
-    document.createElement("div");
-
-  panel.id = "adminPanel";
-
-  panel.className =
-    "admin-panel";
-
-  panel.innerHTML = `
-    <div class="admin-title">
-      <span>👑</span>
-      Administração da sala
-    </div>
-
-    <button
-      id="muteAllBtn"
-      class="admin-action"
-    >
-      🔇 Mutar todos
-    </button>
-
-    <button
-      id="unlockAllBtn"
-      class="admin-action"
-    >
-      🎙️ Liberar microfones
-    </button>
-
-    <div class="admin-info">
-      Você é o administrador desta sala.
-    </div>
-  `;
-
-  document.body.appendChild(panel);
-
-  $("#muteAllBtn").onclick =
-    () => muteAll(true);
-
-  $("#unlockAllBtn").onclick =
-    () => muteAll(false);
-}
-
-function muteAll(value) {
-  if (!isHost) {
     toast(
-      "Somente o administrador pode fazer isso."
+      "No celular o microfone está desativado."
     );
 
     return;
   }
 
-  socket?.send(
-    JSON.stringify({
-      type: "mute-all",
-      value
-    })
-  );
 
-  toast(
-    value
-      ? "Microfones mutados."
-      : "Microfones liberados."
-  );
+  if (micOn) {
+    disableMic();
+  } else {
+    await enableMic();
+  }
 }
+
+
+/* =========================================================
+   INTERFACE
+========================================================= */
+
+function updateShareButtons() {
+
+  const shareButtons = [
+    $("#shareBtn"),
+    $("#shareCenterBtn")
+  ];
+
+
+  for (
+    const button
+    of shareButtons
+  ) {
+
+    if (!button) continue;
+
+    if (deviceType === "mobile") {
+
+      button.classList.add(
+        "hidden"
+      );
+
+    } else {
+
+      button.classList.toggle(
+        "hidden",
+        sharing
+      );
+    }
+  }
+
+
+  const stop =
+    $("#stopShareBtn");
+
+
+  if (stop) {
+
+    stop.classList.toggle(
+      "hidden",
+      !sharing
+    );
+  }
+}
+
+
+function updateMicButton() {
+
+  const button =
+    $("#micBtn");
+
+  if (!button) return;
+
+
+  if (micOn) {
+
+    button.innerHTML =
+      "<span>🎙️</span> Microfone ligado";
+
+  } else {
+
+    button.innerHTML =
+      "<span>🎙️</span> Microfone";
+  }
+}
+
+
+function updateAdminInterface() {
+
+  /*
+   * Menu do administrador
+   */
+
+  const adminMenu =
+    $("#adminPanel");
+
+
+  if (!adminMenu) {
+    return;
+  }
+
+
+  if (isAdmin) {
+
+    adminMenu.classList.remove(
+      "hidden"
+    );
+
+  } else {
+
+    adminMenu.classList.add(
+      "hidden"
+    );
+  }
+}
+
 
 /* =========================================================
    PARTICIPANTES
 ========================================================= */
 
 function participantHTML(p) {
+
   const initial =
     (p.name || "?")
       .slice(0, 1)
       .toUpperCase();
 
-  const hostBadge =
-    p.peerId === getCurrentHost()
-      ? `<span class="host-badge">👑</span>`
+
+  const adminBadge =
+    p.isAdmin
+      ? `<span class="admin-badge">ADM</span>`
       : "";
 
-  const muteBadge =
-    p.muted
-      ? `<span class="mute-badge">🔇</span>`
+
+  const deviceBadge =
+    p.device === "mobile"
+      ? `<span class="device-badge">📱</span>`
+      : `<span class="device-badge">💻</span>`;
+
+
+  const sharingBadge =
+    p.sharing
+      ? `<span class="sharing-dot" title="Transmitindo"></span>`
       : "";
+
+
+  let adminControls = "";
+
+
+  /*
+   * O administrador não pode
+   * controlar a si próprio.
+   */
+
+  if (
+    isAdmin &&
+    p.peerId !== myId
+  ) {
+
+    adminControls = `
+      <div class="participant-actions">
+
+        <button
+          class="mini-btn"
+          onclick="adminMute('${p.peerId}')"
+          title="Mutar microfone"
+        >
+          🔇
+        </button>
+
+        <button
+          class="mini-btn kick-btn"
+          onclick="kickUser('${p.peerId}')"
+          title="Expulsar"
+        >
+          ✕
+        </button>
+
+      </div>
+    `;
+  }
+
 
   return `
     <div
@@ -1153,85 +1292,254 @@ function participantHTML(p) {
       <div class="pname">
         ${escapeHtml(p.name)}
 
-        ${
-          p.peerId === myId
-            ? " <small>(você)</small>"
-            : ""
-        }
+        ${p.peerId === myId
+          ? " (você)"
+          : ""}
+
+        ${adminBadge}
+
       </div>
 
-      ${hostBadge}
-      ${muteBadge}
+      ${deviceBadge}
 
       ${
-        p.sharing
-          ? `<div
-              class="sharing-dot"
-              title="Transmitindo"
-            ></div>`
-          : ""
+        p.micOn
+          ? `<span class="mic-status">🎙️</span>`
+          : `<span class="mic-status muted">🔇</span>`
       }
+
+      ${sharingBadge}
+
+      ${adminControls}
 
     </div>
   `;
 }
 
-function getCurrentHost() {
-  return window.__hostId || myId;
-}
 
 function renderParticipants(list) {
-  $("#participants").innerHTML =
-    list.map(participantHTML).join("");
 
-  $("#count").textContent =
-    list.length;
+  const container =
+    $("#participants");
+
+  if (!container) {
+    return;
+  }
+
+
+  container.innerHTML =
+    list
+      .map(participantHTML)
+      .join("");
+
+
+  const count =
+    $("#count");
+
+  if (count) {
+    count.textContent =
+      list.length;
+  }
 }
 
-function addParticipant(participant) {
+
+function addParticipant(p) {
+
   const exists =
     document.querySelector(
-      `[data-participant="${participant.peerId}"]`
+      `[data-participant="${p.peerId}"]`
     );
 
+
   if (!exists) {
+
     $("#participants")
-      .insertAdjacentHTML(
+      ?.insertAdjacentHTML(
         "beforeend",
-        participantHTML(participant)
+        participantHTML(p)
       );
   }
 
+
   renderParticipantsFromDOM();
 }
 
-function updateParticipant(participant) {
+
+function updateParticipant(p) {
+
   const old =
     document.querySelector(
-      `[data-participant="${participant.peerId}"]`
+      `[data-participant="${p.peerId}"]`
     );
 
+
   if (old) {
+
     old.outerHTML =
-      participantHTML(participant);
+      participantHTML(p);
+
   } else {
-    addParticipant(participant);
+
+    addParticipant(p);
   }
+
 
   renderParticipantsFromDOM();
 }
 
+
 function renderParticipantsFromDOM() {
+
   const count =
     document.querySelectorAll(
       ".participant"
     ).length;
+
 
   if ($("#count")) {
     $("#count").textContent =
       count;
   }
 }
+
+
+/* =========================================================
+   ADMIN
+========================================================= */
+
+function adminMute(peerId) {
+
+  if (!isAdmin) {
+    return;
+  }
+
+
+  socket?.send(
+    JSON.stringify({
+      type: "admin-mic",
+      peerId,
+      value: false
+    })
+  );
+
+
+  toast(
+    "Microfone do usuário mutado."
+  );
+}
+
+
+function kickUser(peerId) {
+
+  if (!isAdmin) {
+    return;
+  }
+
+
+  const participant =
+    document.querySelector(
+      `[data-participant="${peerId}"]`
+    );
+
+
+  const name =
+    participant
+      ?.querySelector(".pname")
+      ?.textContent
+      ?.replace("(você)", "")
+      ?.trim() ||
+    "este usuário";
+
+
+  if (
+    !confirm(
+      `Deseja expulsar ${name} da sala?`
+    )
+  ) {
+    return;
+  }
+
+
+  socket?.send(
+    JSON.stringify({
+      type: "kick",
+      peerId
+    })
+  );
+
+
+  toast(
+    "Usuário removido da sala."
+  );
+}
+
+
+/* =========================================================
+   PEER
+========================================================= */
+
+function removePeer(peerId) {
+
+  const state =
+    peers.get(peerId);
+
+
+  if (state) {
+
+    try {
+      state.pc.close();
+    } catch {}
+
+    peers.delete(peerId);
+  }
+
+
+  document
+    .querySelector(
+      `[data-peer="${peerId}"]`
+    )
+    ?.remove();
+
+
+  document
+    .querySelector(
+      `[data-participant="${peerId}"]`
+    )
+    ?.remove();
+
+
+  renderParticipantsFromDOM();
+
+
+  if (
+    !$("#videos")?.children.length
+  ) {
+
+    showEmpty();
+  }
+}
+
+
+function hideEmpty() {
+
+  $("#emptyState")
+    ?.classList
+    .add("hidden");
+}
+
+
+function showEmpty() {
+
+  if (
+    !$("#videos")?.children.length
+  ) {
+
+    $("#emptyState")
+      ?.classList
+      .remove("hidden");
+  }
+}
+
 
 /* =========================================================
    CHAT
@@ -1242,10 +1550,22 @@ function addChat(
   text,
   mine
 ) {
+
+  const container =
+    $("#chatMessages");
+
+  if (!container) {
+    return;
+  }
+
+
   const element =
     document.createElement("div");
 
-  element.className = "message";
+
+  element.className =
+    "message";
+
 
   element.innerHTML = `
     <div class="meta">
@@ -1261,140 +1581,83 @@ function addChat(
     </div>
   `;
 
-  $("#chatMessages")
-    ?.appendChild(element);
 
-  if ($("#chatMessages")) {
-    $("#chatMessages").scrollTop =
-      $("#chatMessages").scrollHeight;
-  }
+  container.appendChild(
+    element
+  );
+
+
+  container.scrollTop =
+    container.scrollHeight;
 }
+
 
 /* =========================================================
    CONVITE
 ========================================================= */
 
 function copyInvite() {
+
   const url =
     `${location.origin}${location.pathname}?room=${encodeURIComponent(roomId)}`;
 
-  navigator.clipboard
-    ?.writeText(url)
-    .then(
-      () => toast(
-        "Link da sala copiado!"
-      ),
-      () => toast(url)
-    );
-}
 
-/* =========================================================
-   SENHA
-========================================================= */
+  if (
+    navigator.clipboard
+  ) {
 
-function showPasswordModal() {
-  let modal =
-    $("#passwordModal");
+    navigator.clipboard
+      .writeText(url)
+      .then(() => {
 
-  if (!modal) {
-    modal =
-      document.createElement("div");
+        toast(
+          "Link da sala copiado!"
+        );
 
-    modal.id =
-      "passwordModal";
+      })
+      .catch(() => {
 
-    modal.className =
-      "password-modal";
+        toast(url);
+      });
 
-    modal.innerHTML = `
-      <div class="password-box">
+  } else {
 
-        <div class="password-icon">
-          🔐
-        </div>
-
-        <h2>Sala protegida</h2>
-
-        <p>
-          Digite a senha para entrar.
-        </p>
-
-        <input
-          id="roomPassword"
-          type="password"
-          placeholder="Senha da sala"
-          autocomplete="off"
-        >
-
-        <button
-          id="passwordEnter"
-          class="primary"
-        >
-          Entrar na sala
-        </button>
-
-      </div>
-    `;
-
-    document.body.appendChild(modal);
-
-    $("#passwordEnter").onclick =
-      () => {
-        const password =
-          $("#roomPassword").value;
-
-        if (!password) {
-          toast(
-            "Digite a senha."
-          );
-
-          return;
-        }
-
-        modal.remove();
-
-        connect(password);
-      };
-
-    $("#roomPassword").onkeydown =
-      (event) => {
-        if (
-          event.key === "Enter"
-        ) {
-          $("#passwordEnter").click();
-        }
-      };
+    toast(url);
   }
-
-  modal.classList.remove(
-    "hidden"
-  );
 }
+
 
 /* =========================================================
    ENTRAR NA SALA
 ========================================================= */
 
 function enterRoom() {
+
   myName =
     (
-      $("#nameHome")?.value ||
+      $("#nameHome")
+        ?.value ||
       "Convidado"
     )
       .trim()
       .slice(0, 30) ||
     "Convidado";
 
+
   roomId =
     normalizeRoom(
       roomId ||
-      $("#roomInput")?.value
+      $("#roomInput")
+        ?.value
     );
 
+
   if (!roomId) {
+
     roomId =
       randomRoom();
   }
+
 
   history.replaceState(
     {},
@@ -1402,22 +1665,29 @@ function enterRoom() {
     `?room=${encodeURIComponent(roomId)}`
   );
 
+
   $("#home")
-    ?.classList.add("hidden");
+    ?.classList
+    .add("hidden");
+
 
   $("#room")
-    ?.classList.remove("hidden");
+    ?.classList
+    .remove("hidden");
+
 
   connect();
 }
 
+
 /* =========================================================
-   BOTÕES
+   EVENTOS
 ========================================================= */
 
 $("#createBtn")?.addEventListener(
   "click",
   () => {
+
     roomId =
       randomRoom();
 
@@ -1425,15 +1695,19 @@ $("#createBtn")?.addEventListener(
   }
 );
 
+
 $("#joinBtn")?.addEventListener(
   "click",
   () => {
+
     roomId =
       normalizeRoom(
         $("#roomInput")?.value
       );
 
+
     if (!roomId) {
+
       toast(
         "Digite o código da sala."
       );
@@ -1441,46 +1715,53 @@ $("#joinBtn")?.addEventListener(
       return;
     }
 
+
     enterRoom();
   }
 );
+
 
 $("#shareBtn")?.addEventListener(
   "click",
   startShare
 );
 
+
 $("#shareCenterBtn")?.addEventListener(
   "click",
   startShare
 );
+
 
 $("#stopShareBtn")?.addEventListener(
   "click",
   stopShare
 );
 
+
 $("#micBtn")?.addEventListener(
   "click",
   toggleMic
 );
+
 
 $("#copyBtn")?.addEventListener(
   "click",
   copyInvite
 );
 
+
 $("#inviteBtn")?.addEventListener(
   "click",
   copyInvite
 );
 
+
 $("#leaveBtn")?.addEventListener(
   "click",
   () => {
+
     try {
-      stopShare();
-      disableMyMicrophone();
       socket?.close();
     } catch {}
 
@@ -1489,27 +1770,30 @@ $("#leaveBtn")?.addEventListener(
   }
 );
 
-/* CHAT */
 
 $("#chatForm")?.addEventListener(
   "submit",
-  (event) => {
+  event => {
+
     event.preventDefault();
+
 
     const input =
       $("#chatInput");
 
+
     const text =
-      input?.value.trim();
+      input?.value
+        ?.trim();
+
 
     if (
       !text ||
-      !socket ||
-      socket.readyState !==
-        WebSocket.OPEN
+      socket?.readyState !== 1
     ) {
       return;
     }
+
 
     socket.send(
       JSON.stringify({
@@ -1518,222 +1802,48 @@ $("#chatForm")?.addEventListener(
       })
     );
 
+
     input.value = "";
   }
 );
 
-/* ENTER NO CÓDIGO */
 
 $("#roomInput")?.addEventListener(
   "keydown",
-  (event) => {
+  event => {
+
     if (
       event.key === "Enter"
     ) {
+
       $("#joinBtn")?.click();
     }
   }
 );
 
-/* =========================================================
-   BOTÕES DE TRANSMISSÃO
-========================================================= */
-
-function updateShareButtons() {
-  const shareBtn =
-    $("#shareBtn");
-
-  const centerBtn =
-    $("#shareCenterBtn");
-
-  const stopBtn =
-    $("#stopShareBtn");
-
-  if (sharing) {
-    shareBtn
-      ?.classList.add("hidden");
-
-    centerBtn
-      ?.classList.add("hidden");
-
-    stopBtn
-      ?.classList.remove("hidden");
-  } else {
-    shareBtn
-      ?.classList.remove("hidden");
-
-    centerBtn
-      ?.classList.remove("hidden");
-
-    stopBtn
-      ?.classList.add("hidden");
-  }
-}
-
-/* =========================================================
-   ESTADO VAZIO
-========================================================= */
-
-function hideEmpty() {
-  $("#emptyState")
-    ?.classList.add("hidden");
-}
-
-function showEmpty() {
-  if (
-    $("#videos") &&
-    !$("#videos").children.length
-  ) {
-    $("#emptyState")
-      ?.classList.remove("hidden");
-  }
-}
 
 /* =========================================================
    INICIALIZAÇÃO
 ========================================================= */
 
+deviceType =
+  detectDevice();
+
+
 if (roomId) {
+
   $("#home")
-    ?.classList.remove("hidden");
+    ?.classList
+    .remove("hidden");
+
 
   if ($("#roomInput")) {
+
     $("#roomInput").value =
       roomId;
   }
 }
 
-/* =========================================================
-   CSS EXTRA AUTOMÁTICO
-========================================================= */
 
-const extraStyle =
-  document.createElement("style");
-
-extraStyle.textContent = `
-  .admin-panel {
-    position: fixed;
-    right: 25px;
-    top: 85px;
-    z-index: 999;
-    width: 260px;
-    padding: 18px;
-    border-radius: 18px;
-    background: rgba(13, 10, 25, .96);
-    border: 1px solid rgba(139, 92, 246, .35);
-    box-shadow: 0 20px 60px rgba(0,0,0,.45);
-    backdrop-filter: blur(20px);
-  }
-
-  .admin-title {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    font-weight: 800;
-    margin-bottom: 15px;
-  }
-
-  .admin-action {
-    width: 100%;
-    padding: 11px;
-    margin-top: 8px;
-    border-radius: 12px;
-    border: 1px solid rgba(139, 92, 246, .25);
-    background: #171225;
-    color: white;
-    cursor: pointer;
-  }
-
-  .admin-action:hover {
-    background: #21183a;
-  }
-
-  .admin-info {
-    margin-top: 12px;
-    color: #9f98ad;
-    font-size: 11px;
-    line-height: 1.4;
-  }
-
-  .host-badge,
-  .mute-badge {
-    font-size: 11px;
-  }
-
-  .video-card {
-    position: relative;
-  }
-
-  .video-audio-button {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    padding: 12px 18px;
-    border: 0;
-    border-radius: 12px;
-    background: rgba(120, 70, 255, .95);
-    color: white;
-    font-weight: 700;
-    cursor: pointer;
-  }
-
-  .local-video {
-    border: 1px solid rgba(139, 92, 246, .45);
-  }
-
-  .password-modal {
-    position: fixed;
-    inset: 0;
-    z-index: 9999;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(0,0,0,.75);
-    backdrop-filter: blur(12px);
-  }
-
-  .password-box {
-    width: min(400px, calc(100% - 30px));
-    padding: 30px;
-    border-radius: 24px;
-    background: #100d18;
-    border: 1px solid rgba(139, 92, 246, .3);
-    text-align: center;
-    box-shadow: 0 30px 100px rgba(0,0,0,.6);
-  }
-
-  .password-icon {
-    font-size: 42px;
-    margin-bottom: 10px;
-  }
-
-  .password-box h2 {
-    margin: 0 0 8px;
-  }
-
-  .password-box p {
-    color: #9d96a8;
-    font-size: 13px;
-    margin-bottom: 20px;
-  }
-
-  .password-box input {
-    width: 100%;
-    padding: 13px;
-    border-radius: 12px;
-    border: 1px solid #312941;
-    background: #08070c;
-    color: white;
-    outline: none;
-    margin-bottom: 10px;
-  }
-
-  .password-box button {
-    width: 100%;
-  }
-`;
-
-document.head.appendChild(
-  extraStyle
-);
+updateShareButtons();
+updateMicButton();
