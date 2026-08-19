@@ -28,7 +28,7 @@ app.use((_req, res) => {
 const rooms = new Map();
 
 function send(ws, message) {
-  if (ws.readyState === 1) {
+  if (ws && ws.readyState === 1) {
     ws.send(JSON.stringify(message));
   }
 }
@@ -49,7 +49,9 @@ function getRoom(id) {
       clients: new Set(),
       password: null,
       host: null,
-      mutedAll: false
+      mutedAll: false,
+      allowSharing: true,
+      allowMic: true
     };
 
     rooms.set(id, room);
@@ -68,6 +70,19 @@ function cleanRoom(room) {
   }
 }
 
+function isHost(room, peerId) {
+  return room.host === peerId;
+}
+
+function participantInfo(p) {
+  return {
+    peerId: p.peerId,
+    name: p.name,
+    sharing: p.sharing,
+    muted: p.muted
+  };
+}
+
 wss.on("connection", (ws) => {
   ws.isAlive = true;
 
@@ -84,7 +99,9 @@ wss.on("connection", (ws) => {
       return;
     }
 
+    // =========================
     // ENTRAR NA SALA
+    // =========================
     if (msg.type === "join") {
       const id = String(msg.room || "")
         .replace(/[^a-zA-Z0-9_-]/g, "")
@@ -106,7 +123,6 @@ wss.on("connection", (ws) => {
 
       const room = getRoom(id);
 
-      // Sala com senha
       if (room.password && room.password !== password) {
         return send(ws, {
           type: "password-required",
@@ -114,7 +130,6 @@ wss.on("connection", (ws) => {
         });
       }
 
-      // Limite
       if (room.clients.size >= 12) {
         return send(ws, {
           type: "error",
@@ -136,7 +151,7 @@ wss.on("connection", (ws) => {
         muted: false
       };
 
-      // Primeiro participante vira administrador
+      // Primeiro participante = ADM
       if (!room.host) {
         room.host = peerId;
       }
@@ -149,25 +164,17 @@ wss.on("connection", (ws) => {
         room: id,
         host: room.host,
         mutedAll: room.mutedAll,
+        allowSharing: room.allowSharing,
+        allowMic: room.allowMic,
 
-        participants: [...room.clients].map((p) => ({
-          peerId: p.peerId,
-          name: p.name,
-          sharing: p.sharing,
-          muted: p.muted
-        }))
+        participants: [...room.clients].map(participantInfo)
       });
 
       broadcast(
         room,
         {
           type: "participant-joined",
-          participant: {
-            peerId,
-            name,
-            sharing: false,
-            muted: false
-          }
+          participant: participantInfo(participant)
         },
         participant
       );
@@ -175,6 +182,9 @@ wss.on("connection", (ws) => {
       return;
     }
 
+    // =========================
+    // VERIFICAR SALA
+    // =========================
     const room = ws.roomId
       ? rooms.get(ws.roomId)
       : null;
@@ -187,7 +197,9 @@ wss.on("connection", (ws) => {
 
     if (!me) return;
 
+    // =========================
     // WEBRTC
+    // =========================
     if (msg.type === "signal") {
       const target = [...room.clients].find(
         (p) => p.peerId === msg.to
@@ -205,24 +217,31 @@ wss.on("connection", (ws) => {
       return;
     }
 
+    // =========================
     // COMPARTILHAMENTO
+    // =========================
     if (msg.type === "sharing") {
+
+      if (!room.allowSharing && !isHost(room, me.peerId)) {
+        return send(ws, {
+          type: "sharing-blocked",
+          message: "O administrador bloqueou o compartilhamento de tela."
+        });
+      }
+
       me.sharing = !!msg.value;
 
       broadcast(room, {
         type: "participant-updated",
-        participant: {
-          peerId: me.peerId,
-          name: me.name,
-          sharing: me.sharing,
-          muted: me.muted
-        }
+        participant: participantInfo(me)
       });
 
       return;
     }
 
+    // =========================
     // CHAT
+    // =========================
     if (msg.type === "chat") {
       const text = String(msg.text || "")
         .trim()
@@ -241,14 +260,15 @@ wss.on("connection", (ws) => {
       return;
     }
 
-    // MUTAR TODOS
+    // =========================
+    // MUTE TODOS
+    // =========================
     if (msg.type === "mute-all") {
 
-      // Somente o administrador pode mutar todos
-      if (room.host !== me.peerId) {
+      if (!isHost(room, me.peerId)) {
         return send(ws, {
           type: "error",
-          message: "Somente o administrador pode mutar todos."
+          message: "Somente o administrador pode fazer isso."
         });
       }
 
@@ -268,27 +288,176 @@ wss.on("connection", (ws) => {
       return;
     }
 
-    // ALTERAR MICROFONE INDIVIDUAL
-    if (msg.type === "mute") {
+    // =========================
+    // MUTE INDIVIDUAL
+    // =========================
+    if (msg.type === "mute-user") {
 
-      me.muted = !!msg.value;
+      if (!isHost(room, me.peerId)) {
+        return send(ws, {
+          type: "error",
+          message: "Somente o administrador pode mutar participantes."
+        });
+      }
+
+      const target = [...room.clients].find(
+        (p) => p.peerId === msg.peerId
+      );
+
+      if (!target) return;
+
+      target.muted = !!msg.value;
+
+      send(target.ws, {
+        type: "force-mute",
+        value: target.muted
+      });
 
       broadcast(room, {
         type: "participant-updated",
-        participant: {
-          peerId: me.peerId,
-          name: me.name,
-          sharing: me.sharing,
-          muted: me.muted
+        participant: participantInfo(target)
+      });
+
+      return;
+    }
+
+    // =========================
+    // PERMITIR/BLOQUEAR MICROFONE
+    // =========================
+    if (msg.type === "mic-permission") {
+
+      if (!isHost(room, me.peerId)) {
+        return send(ws, {
+          type: "error",
+          message: "Somente o administrador pode alterar essa configuração."
+        });
+      }
+
+      room.allowMic = !!msg.value;
+
+      broadcast(room, {
+        type: "mic-permission",
+        value: room.allowMic
+      });
+
+      return;
+    }
+
+    // =========================
+    // PERMITIR/BLOQUEAR TRANSMISSÃO
+    // =========================
+    if (msg.type === "sharing-permission") {
+
+      if (!isHost(room, me.peerId)) {
+        return send(ws, {
+          type: "error",
+          message: "Somente o administrador pode alterar essa configuração."
+        });
+      }
+
+      room.allowSharing = !!msg.value;
+
+      if (!room.allowSharing) {
+        for (const participant of room.clients) {
+          if (participant.peerId !== me.peerId) {
+            participant.sharing = false;
+          }
         }
+      }
+
+      broadcast(room, {
+        type: "sharing-permission",
+        value: room.allowSharing
+      });
+
+      return;
+    }
+
+    // =========================
+    // EXPULSAR USUÁRIO
+    // =========================
+    if (msg.type === "kick-user") {
+
+      // Apenas o ADM pode expulsar
+      if (!isHost(room, me.peerId)) {
+        return send(ws, {
+          type: "error",
+          message: "Somente o administrador pode expulsar usuários."
+        });
+      }
+
+      const target = [...room.clients].find(
+        (p) => p.peerId === msg.peerId
+      );
+
+      if (!target) {
+        return send(ws, {
+          type: "error",
+          message: "Usuário não encontrado."
+        });
+      }
+
+      // Não pode expulsar a si mesmo
+      if (target.peerId === me.peerId) {
+        return send(ws, {
+          type: "error",
+          message: "Você não pode expulsar a si mesmo."
+        });
+      }
+
+      // Avisa o usuário antes de desconectar
+      send(target.ws, {
+        type: "kicked",
+        message: "Você foi removido da sala pelo administrador."
+      });
+
+      // Avisa os outros participantes
+      broadcast(room, {
+        type: "participant-kicked",
+        peerId: target.peerId,
+        name: target.name
+      }, target);
+
+      // Remove da sala
+      room.clients.delete(target);
+
+      try {
+        target.ws.close(4001, "Kicked by host");
+      } catch {}
+
+      return;
+    }
+
+    // =========================
+    // ALTERAR SENHA
+    // =========================
+    if (msg.type === "set-password") {
+
+      if (!isHost(room, me.peerId)) {
+        return send(ws, {
+          type: "error",
+          message: "Somente o administrador pode alterar a senha."
+        });
+      }
+
+      const password = String(msg.password || "").trim();
+
+      room.password = password || null;
+
+      send(ws, {
+        type: "password-updated",
+        hasPassword: !!room.password
       });
 
       return;
     }
   });
 
+  // =========================
   // USUÁRIO SAIU
+  // =========================
   ws.on("close", () => {
+
     const room = ws.roomId
       ? rooms.get(ws.roomId)
       : null;
@@ -300,6 +469,7 @@ wss.on("connection", (ws) => {
     );
 
     if (me) {
+
       room.clients.delete(me);
 
       broadcast(room, {
@@ -307,8 +477,9 @@ wss.on("connection", (ws) => {
         peerId: me.peerId
       });
 
-      // Se o administrador sair, passa para outro
+      // Se o ADM saiu, passa para outro
       if (room.host === me.peerId) {
+
         const next = room.clients.values().next().value;
 
         room.host = next
@@ -328,8 +499,11 @@ wss.on("connection", (ws) => {
   });
 });
 
-// Keep Alive
+// =========================
+// KEEP ALIVE
+// =========================
 setInterval(() => {
+
   for (const ws of wss.clients) {
 
     if (!ws.isAlive) {
@@ -346,8 +520,12 @@ setInterval(() => {
       ws.ping();
     } catch {}
   }
+
 }, 30000);
 
+// =========================
+// SERVIDOR
+// =========================
 server.listen(PORT, "0.0.0.0", () => {
   console.log(
     `Hype Roleplay rodando na porta ${PORT}`
