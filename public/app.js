@@ -1,15 +1,12 @@
 ```javascript
 /* =========================================================
    HYPE ROLEPLAY
-   COMPARTILHAMENTO DE TELA - WEBRTC
-   VERSÃO CORRIGIDA
+   Compartilhamento de tela - WebRTC
+   Android/iPhone = somente assistir
+   PC = transmitir + microfone
 ========================================================= */
 
 const $ = id => document.getElementById(id);
-
-/* =========================================================
-   ELEMENTOS
-========================================================= */
 
 const home = $("home");
 const roomPage = $("room");
@@ -48,6 +45,7 @@ const toastEl = $("toast");
 const adminPanel = $("adminPanel");
 const adminButton = $("adminButton");
 
+
 /* =========================================================
    ESTADO
 ========================================================= */
@@ -61,106 +59,56 @@ let myName = "";
 let isAdmin = false;
 let isMobile = false;
 
-/*
- * Stream da tela local.
- */
 let localScreenStream = null;
-
-/*
- * Stream do microfone local.
- */
 let localMicStream = null;
 
-/*
- * Microfone começa SEMPRE desligado.
- */
 let micEnabled = false;
 
-/*
- * Peer connections.
- */
 const peers = new Map();
-
-/*
- * Participantes.
- */
 const participants = new Map();
 
-/*
- * Streams remotos.
- *
- * Cada participante terá UMA única MediaStream.
- */
-const remoteStreams = new Map();
-
-/*
- * Evita adicionar duas vezes
- * o mesmo track.
- */
-const remoteTracks = new Map();
-
-/*
- * Reconexão.
- */
 const reconnectState = {
   attempts: 0,
   timer: null
 };
+
+let toastTimer = null;
+
 
 /* =========================================================
    MOBILE
 ========================================================= */
 
 function detectMobile() {
+  const ua = navigator.userAgent || "";
 
-  const ua =
-    navigator.userAgent || "";
-
-  return /Android|iPhone|iPad|iPod|Mobile/i.test(
-    ua
-  );
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
 }
 
 isMobile = detectMobile();
+
 
 /* =========================================================
    TOAST
 ========================================================= */
 
-let toastTimer = null;
-
 function toast(message) {
 
   if (!toastEl) {
-
-    console.log(message);
-
+    alert(message);
     return;
   }
 
-  toastEl.textContent =
-    message;
+  toastEl.textContent = message;
+  toastEl.classList.add("show");
 
-  toastEl.classList.add(
-    "show"
-  );
+  clearTimeout(toastTimer);
 
-  clearTimeout(
-    toastTimer
-  );
-
-  toastTimer =
-    setTimeout(
-      () => {
-
-        toastEl.classList.remove(
-          "show"
-        );
-
-      },
-      3000
-    );
+  toastTimer = setTimeout(() => {
+    toastEl.classList.remove("show");
+  }, 3000);
 }
+
 
 /* =========================================================
    URL
@@ -168,39 +116,26 @@ function toast(message) {
 
 function getRoomFromUrl() {
 
-  const url =
-    new URL(
-      window.location.href
-    );
+  const url = new URL(window.location.href);
 
   return (
-    url.searchParams.get(
-      "room"
-    ) || ""
+    url.searchParams.get("room") || ""
   ).trim();
 }
 
+
 function updateUrl(room) {
 
-  const url =
-    new URL(
-      window.location.href
-    );
+  const url = new URL(window.location.href);
 
-  url.searchParams.set(
-    "room",
-    room
-  );
+  url.searchParams.set("room", room);
 
-  history.replaceState(
-    {},
-    "",
-    url
-  );
+  history.replaceState({}, "", url);
 }
 
+
 /* =========================================================
-   SALA
+   GERAR SALA
 ========================================================= */
 
 function generateRoom() {
@@ -210,215 +145,149 @@ function generateRoom() {
 
   let result = "";
 
-  for (
-    let i = 0;
-    i < 6;
-    i++
-  ) {
+  for (let i = 0; i < 6; i++) {
 
-    result +=
-      chars[
-        Math.floor(
-          Math.random() *
-          chars.length
-        )
-      ];
+    result += chars[
+      Math.floor(
+        Math.random() * chars.length
+      )
+    ];
+
   }
 
   return result;
 }
 
+
 /* =========================================================
    CRIAR SALA
 ========================================================= */
 
-createBtn?.addEventListener(
-  "click",
-  () => {
+createBtn?.addEventListener("click", () => {
 
-    const name =
-      nameHome.value.trim();
+  const name =
+    nameHome.value.trim();
 
-    if (!name) {
+  if (!name) {
 
-      toast(
-        "Digite seu nome primeiro."
-      );
+    toast("Digite seu nome primeiro.");
 
-      nameHome.focus();
+    nameHome.focus();
 
-      return;
-    }
-
-    localStorage.setItem(
-      "hype_name",
-      name
-    );
-
-    const room =
-      generateRoom();
-
-    enterRoom(
-      room,
-      name
-    );
+    return;
   }
-);
+
+  const room = generateRoom();
+
+  saveName(name);
+
+  enterRoom(room, name);
+
+});
+
 
 /* =========================================================
    ENTRAR
 ========================================================= */
 
-joinBtn?.addEventListener(
-  "click",
-  () => {
+joinBtn?.addEventListener("click", () => {
 
-    const name =
-      nameHome.value.trim();
+  const name =
+    nameHome.value.trim();
 
-    const room =
-      roomInput.value
-        .trim()
-        .toUpperCase();
+  const room =
+    roomInput.value
+      .trim()
+      .toUpperCase();
 
-    if (!name) {
+  if (!name) {
 
-      toast(
-        "Digite seu nome primeiro."
-      );
+    toast("Digite seu nome primeiro.");
 
-      nameHome.focus();
+    nameHome.focus();
 
-      return;
-    }
-
-    if (!room) {
-
-      toast(
-        "Digite o código da sala."
-      );
-
-      roomInput.focus();
-
-      return;
-    }
-
-    localStorage.setItem(
-      "hype_name",
-      name
-    );
-
-    enterRoom(
-      room,
-      name
-    );
+    return;
   }
-);
 
-/* =========================================================
-   ENTER
-========================================================= */
+  if (!room) {
 
-roomInput?.addEventListener(
-  "keydown",
-  event => {
+    toast("Digite o código da sala.");
 
-    if (
-      event.key === "Enter"
-    ) {
+    roomInput.focus();
 
-      joinBtn?.click();
-
-    }
+    return;
   }
-);
 
-nameHome?.addEventListener(
-  "keydown",
-  event => {
+  saveName(name);
 
-    if (
-      event.key === "Enter"
-    ) {
+  enterRoom(room, name);
 
-      createBtn?.click();
+});
 
-    }
+
+roomInput?.addEventListener("keydown", event => {
+
+  if (event.key === "Enter") {
+    joinBtn?.click();
   }
-);
+
+});
+
+
+nameHome?.addEventListener("keydown", event => {
+
+  if (event.key === "Enter") {
+    createBtn?.click();
+  }
+
+});
+
 
 /* =========================================================
    ENTRAR NA SALA
 ========================================================= */
 
-function enterRoom(
-  room,
-  name
-) {
+function enterRoom(room, name) {
 
   roomId =
     room
-      .replace(
-        /[^a-zA-Z0-9_-]/g,
-        ""
-      )
-      .slice(
-        0,
-        32
-      );
+      .replace(/[^a-zA-Z0-9_-]/g, "")
+      .slice(0, 32);
 
   myName =
     name
-      .slice(
-        0,
-        30
-      );
+      .trim()
+      .slice(0, 30);
 
   if (!roomId) {
 
-    toast(
-      "Código de sala inválido."
-    );
+    toast("Código de sala inválido.");
 
     return;
   }
 
+  updateUrl(roomId);
+
+  home?.classList.add("hidden");
+
+  roomPage?.classList.remove("hidden");
+
+  roomCodeEl.textContent = roomId;
+
+  roomStatus.textContent = "Conectando...";
+
   /*
-   * Sempre começa mutado.
+   * IMPORTANTE:
+   * Todo participante entra mutado.
    */
-  micEnabled =
-    false;
+
+  micEnabled = false;
 
   updateMicButton();
 
-  updateUrl(
-    roomId
-  );
-
-  home?.classList.add(
-    "hidden"
-  );
-
-  roomPage?.classList.remove(
-    "hidden"
-  );
-
-  if (roomCodeEl) {
-
-    roomCodeEl.textContent =
-      roomId;
-
-  }
-
-  if (roomStatus) {
-
-    roomStatus.textContent =
-      "Conectando...";
-
-  }
-
   connectSocket();
 }
+
 
 /* =========================================================
    WEBSOCKET URL
@@ -427,8 +296,7 @@ function enterRoom(
 function websocketUrl() {
 
   const protocol =
-    window.location.protocol ===
-    "https:"
+    window.location.protocol === "https:"
       ? "wss:"
       : "ws:";
 
@@ -439,6 +307,7 @@ function websocketUrl() {
   );
 }
 
+
 /* =========================================================
    WEBSOCKET
 ========================================================= */
@@ -448,116 +317,70 @@ function connectSocket() {
   if (
     socket &&
     (
-      socket.readyState ===
-      WebSocket.OPEN ||
-
-      socket.readyState ===
-      WebSocket.CONNECTING
+      socket.readyState === WebSocket.OPEN ||
+      socket.readyState === WebSocket.CONNECTING
     )
   ) {
-
     return;
   }
 
-  if (roomStatus) {
+  roomStatus.textContent = "Conectando...";
+
+  socket = new WebSocket(websocketUrl());
+
+  socket.addEventListener("open", () => {
+
+    reconnectState.attempts = 0;
+
+    roomStatus.textContent = "Conectado";
+
+    send({
+      type: "join",
+      room: roomId,
+      name: myName,
+      mobile: isMobile
+    });
+
+  });
+
+
+  socket.addEventListener("message", event => {
+
+    let message;
+
+    try {
+
+      message =
+        JSON.parse(event.data);
+
+    } catch {
+
+      return;
+    }
+
+    handleMessage(message);
+
+  });
+
+
+  socket.addEventListener("close", () => {
+
+    roomStatus.textContent = "Desconectado";
+
+    scheduleReconnect();
+
+  });
+
+
+  socket.addEventListener("error", () => {
 
     roomStatus.textContent =
-      "Conectando...";
+      "Erro de conexão";
 
-  }
+  });
 
-  socket =
-    new WebSocket(
-      websocketUrl()
-    );
-
-  socket.addEventListener(
-    "open",
-    () => {
-
-      reconnectState.attempts =
-        0;
-
-      if (roomStatus) {
-
-        roomStatus.textContent =
-          "Conectado";
-
-      }
-
-      send({
-        type:
-          "join",
-
-        room:
-          roomId,
-
-        name:
-          myName,
-
-        mobile:
-          isMobile
-      });
-
-    }
-  );
-
-  socket.addEventListener(
-    "message",
-    event => {
-
-      let message;
-
-      try {
-
-        message =
-          JSON.parse(
-            event.data
-          );
-
-      } catch {
-
-        return;
-
-      }
-
-      handleMessage(
-        message
-      );
-
-    }
-  );
-
-  socket.addEventListener(
-    "close",
-    () => {
-
-      if (roomStatus) {
-
-        roomStatus.textContent =
-          "Desconectado";
-
-      }
-
-      scheduleReconnect();
-
-    }
-  );
-
-  socket.addEventListener(
-    "error",
-    () => {
-
-      if (roomStatus) {
-
-        roomStatus.textContent =
-          "Erro de conexão";
-
-      }
-
-    }
-  );
 }
+
 
 /* =========================================================
    RECONEXÃO
@@ -565,12 +388,8 @@ function connectSocket() {
 
 function scheduleReconnect() {
 
-  if (
-    reconnectState.timer
-  ) {
-
+  if (reconnectState.timer) {
     return;
-
   }
 
   reconnectState.attempts++;
@@ -578,23 +397,19 @@ function scheduleReconnect() {
   const delay =
     Math.min(
       10000,
-      1000 *
-      reconnectState.attempts
+      1000 * reconnectState.attempts
     );
 
   reconnectState.timer =
-    setTimeout(
-      () => {
+    setTimeout(() => {
 
-        reconnectState.timer =
-          null;
+      reconnectState.timer = null;
 
-        connectSocket();
+      connectSocket();
 
-      },
-      delay
-    );
+    }, delay);
 }
+
 
 /* =========================================================
    SEND
@@ -604,115 +419,75 @@ function send(message) {
 
   if (
     !socket ||
-    socket.readyState !==
-    WebSocket.OPEN
+    socket.readyState !== WebSocket.OPEN
   ) {
-
-    return false;
-
-  }
-
-  try {
-
-    socket.send(
-      JSON.stringify(
-        message
-      )
-    );
-
-    return true;
-
-  } catch (error) {
-
-    console.error(
-      "Erro WebSocket:",
-      error
-    );
-
     return false;
   }
+
+  socket.send(
+    JSON.stringify(message)
+  );
+
+  return true;
 }
+
 
 /* =========================================================
    MENSAGENS
 ========================================================= */
 
-async function handleMessage(
-  msg
-) {
+async function handleMessage(msg) {
 
-  switch (
-    msg.type
-  ) {
+  switch (msg.type) {
 
     case "joined":
 
-      await handleJoined(
-        msg
-      );
+      await handleJoined(msg);
 
       break;
+
 
     case "participant-joined":
 
-      addParticipant(
-        msg.participant
-      );
-
-      /*
-       * O novo participante não inicia
-       * conexão duplicada aqui.
-       *
-       * O usuário que já estava na sala
-       * cria a conexão.
-       */
-
-      await createPeerConnection(
-        msg.participant.peerId,
-        true
-      );
+      addParticipant(msg.participant);
 
       break;
+
 
     case "participant-left":
 
-      removeParticipant(
-        msg.peerId
-      );
+      removeParticipant(msg.peerId);
 
       break;
+
 
     case "participant-updated":
 
-      updateParticipant(
-        msg.participant
-      );
+      updateParticipant(msg.participant);
 
       break;
+
 
     case "participants-refresh":
 
-      refreshParticipants(
-        msg.participants
-      );
+      refreshParticipants(msg.participants);
 
       break;
+
 
     case "signal":
 
-      await handleSignal(
-        msg
-      );
+      await handleSignal(msg);
 
       break;
+
 
     case "chat":
 
-      addChatMessage(
-        msg
-      );
+      addChatMessage(msg);
 
       break;
+
 
     case "error":
 
@@ -723,6 +498,7 @@ async function handleMessage(
 
       break;
 
+
     case "kicked":
 
       toast(
@@ -731,34 +507,32 @@ async function handleMessage(
       );
 
       setTimeout(
-        () => leaveRoom(),
+        leaveRoom,
         1000
       );
 
       break;
 
+
     case "forced-mute":
 
       setLocalMute(
-        Boolean(
-          msg.muted
-        )
+        Boolean(msg.muted)
       );
 
       break;
+
 
     case "force-stop-share":
 
-      stopScreenShare(
-        false
-      );
+      stopScreenShare(false);
 
       break;
 
+
     case "admin-promoted":
 
-      isAdmin =
-        true;
+      isAdmin = true;
 
       updateAdminInterface();
 
@@ -767,40 +541,31 @@ async function handleMessage(
       );
 
       break;
+
   }
+
 }
+
 
 /* =========================================================
    JOINED
 ========================================================= */
 
-async function handleJoined(
-  msg
-) {
+async function handleJoined(msg) {
 
-  myPeerId =
-    msg.peerId;
+  myPeerId = msg.peerId;
 
-  isAdmin =
-    Boolean(
-      msg.admin
-    );
+  isAdmin = Boolean(msg.admin);
 
-  roomId =
-    msg.room;
+  roomId = msg.room;
 
-  if (roomCodeEl) {
-
-    roomCodeEl.textContent =
-      roomId;
-
-  }
+  roomCodeEl.textContent = roomId;
 
   /*
-   * Começa mutado.
+   * Todos entram mutados.
    */
-  micEnabled =
-    false;
+
+  micEnabled = false;
 
   updateMicButton();
 
@@ -810,86 +575,66 @@ async function handleJoined(
 
   updateAdminInterface();
 
+
   /*
-   * Conecta somente com quem já estava
-   * na sala.
+   * Criar conexões com quem já estava na sala.
    */
 
   for (
-    const participant
-    of (
+    const participant of (
       msg.participants || []
     )
   ) {
 
     if (
-      participant.peerId ===
-      myPeerId
+      participant.peerId === myPeerId
     ) {
-
       continue;
-
     }
 
-    addParticipant(
-      participant
-    );
+    addParticipant(participant);
 
-    /*
-     * Só o novo usuário cria a conexão.
-     */
     await createPeerConnection(
       participant.peerId,
       true
     );
+
   }
 
-  /*
-   * Celular somente assiste.
-   */
 
   if (isMobile) {
 
-    hideMobileControls();
-
     toast(
-      "Você entrou como espectador. No celular é possível assistir às transmissões."
+      "Modo espectador: você pode assistir às transmissões."
     );
 
   }
+
 }
+
 
 /* =========================================================
    PARTICIPANTES
 ========================================================= */
 
-function refreshParticipants(
-  list
-) {
+function refreshParticipants(list) {
 
   participants.clear();
 
-  for (
-    const participant
-    of list
-  ) {
+  for (const participant of list) {
 
     participants.set(
       participant.peerId,
       participant
     );
+
   }
 
   renderParticipants();
 }
 
-function addParticipant(
-  participant
-) {
 
-  if (!participant) {
-    return;
-  }
+function addParticipant(participant) {
 
   participants.set(
     participant.peerId,
@@ -899,88 +644,38 @@ function addParticipant(
   renderParticipants();
 }
 
-function updateParticipant(
-  participant
-) {
 
-  if (!participant) {
-    return;
-  }
+function updateParticipant(participant) {
 
   participants.set(
     participant.peerId,
     participant
   );
 
-  /*
-   * Atualiza o nome na tela sem recriar
-   * a conexão WebRTC.
-   */
-
-  const card =
-    document.getElementById(
-      `video-${participant.peerId}`
-    );
-
-  if (card) {
-
-    const name =
-      card.querySelector(
-        ".video-name"
-      );
-
-    if (name) {
-
-      name.textContent =
-        participant.name ||
-        "Participante";
-
-    }
-  }
-
   renderParticipants();
 }
 
-function removeParticipant(
-  peerId
-) {
 
-  participants.delete(
-    peerId
-  );
+function removeParticipant(peerId) {
 
-  const pc =
-    peers.get(
-      peerId
-    );
+  participants.delete(peerId);
+
+  const pc = peers.get(peerId);
 
   if (pc) {
 
     try {
-
       pc.close();
-
     } catch {}
 
-    peers.delete(
-      peerId
-    );
+    peers.delete(peerId);
   }
 
-  remoteStreams.delete(
-    peerId
-  );
-
-  remoteTracks.delete(
-    peerId
-  );
-
-  removeVideo(
-    peerId
-  );
+  removeVideo(peerId);
 
   renderParticipants();
 }
+
 
 /* =========================================================
    PARTICIPANTES NA TELA
@@ -992,58 +687,45 @@ function renderParticipants() {
     return;
   }
 
-  participantsEl.innerHTML =
-    "";
+  participantsEl.innerHTML = "";
 
   for (
-    const participant
-    of participants.values()
+    const participant of participants.values()
   ) {
 
     const row =
-      document.createElement(
-        "div"
-      );
+      document.createElement("div");
 
-    row.className =
-      "participant";
+    row.className = "participant";
+
 
     const avatar =
-      document.createElement(
-        "div"
-      );
+      document.createElement("div");
 
-    avatar.className =
-      "avatar";
+    avatar.className = "avatar";
 
     avatar.textContent =
       (
-        participant.name ||
-        "?"
+        participant.name || "?"
       )
         .charAt(0)
         .toUpperCase();
 
-    const name =
-      document.createElement(
-        "div"
-      );
 
-    name.className =
-      "pname";
+    const name =
+      document.createElement("div");
+
+    name.className = "pname";
 
     name.textContent =
       participant.name ||
       "Convidado";
 
-    if (
-      participant.admin
-    ) {
+
+    if (participant.admin) {
 
       const badge =
-        document.createElement(
-          "span"
-        );
+        document.createElement("span");
 
       badge.className =
         "admin-badge";
@@ -1051,15 +733,13 @@ function renderParticipants() {
       badge.textContent =
         "ADM";
 
-      name.appendChild(
-        badge
-      );
+      name.appendChild(badge);
+
     }
 
+
     const device =
-      document.createElement(
-        "span"
-      );
+      document.createElement("span");
 
     device.className =
       "device-badge";
@@ -1069,10 +749,9 @@ function renderParticipants() {
         ? "📱"
         : "💻";
 
+
     const mic =
-      document.createElement(
-        "span"
-      );
+      document.createElement("span");
 
     mic.className =
       "mic-status";
@@ -1082,77 +761,56 @@ function renderParticipants() {
         ? "🔇"
         : "🎙️";
 
-    if (
-      participant.muted
-    ) {
 
-      mic.classList.add(
-        "muted"
-      );
-
+    if (participant.muted) {
+      mic.classList.add("muted");
     }
 
-    row.appendChild(
-      avatar
-    );
 
-    row.appendChild(
-      name
-    );
+    row.appendChild(avatar);
+    row.appendChild(name);
+    row.appendChild(device);
+    row.appendChild(mic);
 
-    row.appendChild(
-      device
-    );
 
-    row.appendChild(
-      mic
-    );
-
-    if (
-      participant.sharing
-    ) {
+    if (participant.sharing) {
 
       const dot =
-        document.createElement(
-          "span"
-        );
+        document.createElement("span");
 
       dot.className =
         "sharing-dot";
 
-      row.appendChild(
-        dot
-      );
+      dot.title =
+        "Compartilhando tela";
+
+      row.appendChild(dot);
+
     }
 
+
     /*
-     * Controles do administrador.
+     * Administração
      */
 
     if (
       isAdmin &&
-      participant.peerId !==
-      myPeerId
+      participant.peerId !== myPeerId
     ) {
 
       const actions =
-        document.createElement(
-          "div"
-        );
+        document.createElement("div");
 
       actions.className =
         "participant-actions";
 
+
       const mute =
-        document.createElement(
-          "button"
-        );
+        document.createElement("button");
 
-      mute.className =
-        "mini-btn";
+      mute.className = "mini-btn";
 
-      mute.type =
-        "button";
+      mute.type = "button";
 
       mute.title =
         "Mutar usuário";
@@ -1161,6 +819,7 @@ function renderParticipants() {
         participant.muted
           ? "🔊"
           : "🔇";
+
 
       mute.addEventListener(
         "click",
@@ -1176,22 +835,20 @@ function renderParticipants() {
         }
       );
 
+
       const kick =
-        document.createElement(
-          "button"
-        );
+        document.createElement("button");
 
       kick.className =
         "mini-btn kick-btn";
 
-      kick.type =
-        "button";
+      kick.type = "button";
 
       kick.title =
         "Expulsar usuário";
 
-      kick.textContent =
-        "✕";
+      kick.textContent = "✕";
+
 
       kick.addEventListener(
         "click",
@@ -1206,33 +863,33 @@ function renderParticipants() {
         }
       );
 
-      actions.appendChild(
-        mute
-      );
 
-      actions.appendChild(
-        kick
-      );
+      actions.appendChild(mute);
+      actions.appendChild(kick);
 
-      row.appendChild(
-        actions
-      );
+      row.appendChild(actions);
+
     }
 
-    participantsEl.appendChild(
-      row
-    );
+
+    participantsEl.appendChild(row);
+
   }
+
+
+  /*
+   * Mostra quantidade correta.
+   */
 
   if (countEl) {
 
     countEl.textContent =
-      String(
-        participants.size
-      );
+      String(participants.size);
 
   }
+
 }
+
 
 /* =========================================================
    ADMIN
@@ -1246,127 +903,107 @@ function updateAdminInterface() {
 
   if (isAdmin) {
 
-    roomPage.classList.add(
-      "admin-mode"
-    );
+    roomPage.classList.add("admin-mode");
 
     if (adminButton) {
-
       adminButton.style.display =
         "inline-flex";
-
     }
 
   } else {
 
-    roomPage.classList.remove(
-      "admin-mode"
-    );
+    roomPage.classList.remove("admin-mode");
 
     if (adminButton) {
-
       adminButton.style.display =
         "none";
-
     }
 
-    adminPanel?.classList.add(
-      "hidden"
-    );
+    adminPanel?.classList.add("hidden");
+
   }
 
   renderParticipants();
 }
 
-window.toggleAdminPanel =
-  function () {
 
-    if (!isAdmin) {
+window.toggleAdminPanel = function () {
 
-      toast(
-        "Somente o administrador pode abrir este menu."
-      );
-
-      return;
-    }
-
-    adminPanel?.classList.toggle(
-      "hidden"
-    );
-  };
-
-window.adminMuteAll =
-  function () {
-
-    if (!isAdmin) {
-      return;
-    }
-
-    send({
-      type:
-        "admin-mute-all"
-    });
+  if (!isAdmin) {
 
     toast(
-      "Todos os microfones foram silenciados."
+      "Somente o administrador pode abrir este menu."
     );
-  };
 
-window.adminStopShares =
-  function () {
+    return;
+  }
 
-    if (!isAdmin) {
-      return;
-    }
+  adminPanel?.classList.toggle("hidden");
+};
 
-    send({
-      type:
-        "admin-stop-shares"
-    });
 
-    toast(
-      "Encerrando transmissões..."
-    );
-  };
-
-window.adminCopyInvite =
-  function () {
-
-    copyInvite();
-
-  };
-
-function adminMuteUser(
-  peerId,
-  muted
-) {
+window.adminMuteAll = function () {
 
   if (!isAdmin) {
     return;
   }
 
   send({
-    type:
-      "admin-mute",
+    type: "admin-mute-all"
+  });
 
+  toast(
+    "Microfones silenciados."
+  );
+};
+
+
+window.adminStopShares = function () {
+
+  if (!isAdmin) {
+    return;
+  }
+
+  send({
+    type: "admin-stop-shares"
+  });
+
+  toast(
+    "Encerrando transmissões..."
+  );
+};
+
+
+window.adminCopyInvite = function () {
+
+  copyInvite();
+
+};
+
+
+function adminMuteUser(peerId, muted) {
+
+  if (!isAdmin) {
+    return;
+  }
+
+  send({
+    type: "admin-mute",
     peerId,
-
     muted
   });
+
 }
 
-function adminKickUser(
-  peerId
-) {
+
+function adminKickUser(peerId) {
 
   if (!isAdmin) {
     return;
   }
 
   const participant =
-    participants.get(
-      peerId
-    );
+    participants.get(peerId);
 
   if (!participant) {
     return;
@@ -1382,12 +1019,12 @@ function adminKickUser(
   }
 
   send({
-    type:
-      "admin-kick",
-
+    type: "admin-kick",
     peerId
   });
+
 }
+
 
 /* =========================================================
    WEBRTC
@@ -1398,25 +1035,10 @@ function createPeerConnection(
   initiator
 ) {
 
-  if (
-    peerId === myPeerId
-  ) {
-
-    return null;
-
+  if (peers.has(peerId)) {
+    return peers.get(peerId);
   }
 
-  if (
-    peers.has(
-      peerId
-    )
-  ) {
-
-    return peers.get(
-      peerId
-    );
-
-  }
 
   const pc =
     new RTCPeerConnection({
@@ -1437,31 +1059,24 @@ function createPeerConnection(
 
     });
 
-  peers.set(
-    peerId,
-    pc
-  );
+
+  peers.set(peerId, pc);
+
 
   /*
-   * NÃO adicionamos microfone automaticamente.
-   *
-   * Isso evita:
-   * - retorno
-   * - duplicação
-   * - microfone aberto sem autorização.
+   * Microfone:
+   * só adiciona se realmente estiver ativo.
    */
 
   if (
-    localMicStream
+    localMicStream &&
+    micEnabled
   ) {
 
     for (
-      const track
-      of localMicStream.getAudioTracks()
+      const track of
+      localMicStream.getAudioTracks()
     ) {
-
-      track.enabled =
-        micEnabled;
 
       pc.addTrack(
         track,
@@ -1469,19 +1084,20 @@ function createPeerConnection(
       );
 
     }
+
   }
 
+
   /*
-   * Adicionar tela se estiver compartilhando.
+   * Tela:
+   * adiciona somente no PC que estiver transmitindo.
    */
 
-  if (
-    localScreenStream
-  ) {
+  if (localScreenStream) {
 
     for (
-      const track
-      of localScreenStream.getTracks()
+      const track of
+      localScreenStream.getTracks()
     ) {
 
       pc.addTrack(
@@ -1490,58 +1106,55 @@ function createPeerConnection(
       );
 
     }
+
   }
 
-  /*
-   * ICE
-   */
 
   pc.onicecandidate =
     event => {
 
-      if (
-        event.candidate
-      ) {
-
-        send({
-
-          type:
-            "signal",
-
-          to:
-            peerId,
-
-          signal: {
-
-            type:
-              "candidate",
-
-            candidate:
-              event.candidate
-
-          }
-
-        });
+      if (!event.candidate) {
+        return;
       }
+
+      send({
+
+        type: "signal",
+
+        to: peerId,
+
+        signal: {
+
+          type: "candidate",
+
+          candidate:
+            event.candidate
+
+        }
+
+      });
+
     };
 
-  /*
-   * RECEBER ÁUDIO/TELA.
-   */
 
   pc.ontrack =
     event => {
 
-      handleRemoteTrack(
+      const stream =
+        event.streams &&
+        event.streams[0];
+
+      if (!stream) {
+        return;
+      }
+
+      showRemoteVideo(
         peerId,
-        event
+        stream
       );
 
     };
 
-  /*
-   * Estado.
-   */
 
   pc.onconnectionstatechange =
     () => {
@@ -1552,9 +1165,7 @@ function createPeerConnection(
       ) {
 
         try {
-
           pc.restartIce();
-
         } catch {}
 
       }
@@ -1564,16 +1175,12 @@ function createPeerConnection(
         "closed"
       ) {
 
-        removeVideo(
-          peerId
-        );
+        removeVideo(peerId);
 
       }
+
     };
 
-  /*
-   * Só o iniciador cria oferta.
-   */
 
   if (initiator) {
 
@@ -1584,85 +1191,10 @@ function createPeerConnection(
 
   }
 
+
   return pc;
 }
 
-/* =========================================================
-   REMOTE TRACK
-========================================================= */
-
-function handleRemoteTrack(
-  peerId,
-  event
-) {
-
-  if (!event.track) {
-    return;
-  }
-
-  let stream =
-    remoteStreams.get(
-      peerId
-    );
-
-  if (!stream) {
-
-    stream =
-      new MediaStream();
-
-    remoteStreams.set(
-      peerId,
-      stream
-    );
-  }
-
-  /*
-   * Evita adicionar o mesmo track duas vezes.
-   */
-
-  let trackSet =
-    remoteTracks.get(
-      peerId
-    );
-
-  if (!trackSet) {
-
-    trackSet =
-      new Set();
-
-    remoteTracks.set(
-      peerId,
-      trackSet
-    );
-  }
-
-  if (
-    trackSet.has(
-      event.track.id
-    )
-  ) {
-
-    return;
-
-  }
-
-  trackSet.add(
-    event.track.id
-  );
-
-  stream.addTrack(
-    event.track
-  );
-
-  /*
-   * Uma única mídia para cada participante.
-   */
-
-  showRemoteMedia(
-    peerId,
-    stream
-  );
-}
 
 /* =========================================================
    OFERTA
@@ -1672,10 +1204,6 @@ async function makeOffer(
   peerId,
   pc
 ) {
-
-  if (!pc) {
-    return;
-  }
 
   try {
 
@@ -1688,16 +1216,13 @@ async function makeOffer(
 
     send({
 
-      type:
-        "signal",
+      type: "signal",
 
-      to:
-        peerId,
+      to: peerId,
 
       signal: {
 
-        type:
-          "offer",
+        type: "offer",
 
         sdp:
           pc.localDescription
@@ -1714,37 +1239,21 @@ async function makeOffer(
     );
 
   }
+
 }
+
 
 /* =========================================================
    SIGNAL
 ========================================================= */
 
-async function handleSignal(
-  msg
-) {
+async function handleSignal(msg) {
 
   const peerId =
     msg.from;
 
-  if (
-    !peerId ||
-    peerId === myPeerId
-  ) {
-
-    return;
-
-  }
-
   let pc =
-    peers.get(
-      peerId
-    );
-
-  /*
-   * Quem recebe uma oferta cria a conexão
-   * mas NÃO cria outra oferta.
-   */
+    peers.get(peerId);
 
   if (!pc) {
 
@@ -1756,16 +1265,8 @@ async function handleSignal(
 
   }
 
-  if (!pc) {
-    return;
-  }
-
   const signal =
     msg.signal;
-
-  if (!signal) {
-    return;
-  }
 
   try {
 
@@ -1787,16 +1288,13 @@ async function handleSignal(
 
       send({
 
-        type:
-          "signal",
+        type: "signal",
 
-        to:
-          peerId,
+        to: peerId,
 
         signal: {
 
-          type:
-            "answer",
+          type: "answer",
 
           sdp:
             pc.localDescription
@@ -1805,40 +1303,25 @@ async function handleSignal(
 
       });
 
-      return;
     }
 
-    if (
+    else if (
       signal.type ===
       "answer"
     ) {
 
-      /*
-       * Evita erro de estado.
-       */
+      await pc.setRemoteDescription(
+        signal.sdp
+      );
 
-      if (
-        pc.signalingState ===
-        "have-local-offer"
-      ) {
-
-        await pc.setRemoteDescription(
-          signal.sdp
-        );
-
-      }
-
-      return;
     }
 
-    if (
+    else if (
       signal.type ===
       "candidate"
     ) {
 
-      if (
-        signal.candidate
-      ) {
+      if (signal.candidate) {
 
         try {
 
@@ -1854,6 +1337,7 @@ async function handleSignal(
           );
 
         }
+
       }
 
     }
@@ -1866,13 +1350,15 @@ async function handleSignal(
     );
 
   }
+
 }
 
+
 /* =========================================================
-   MOSTRAR MÍDIA REMOTA
+   VÍDEO REMOTO
 ========================================================= */
 
-function showRemoteMedia(
+function showRemoteVideo(
   peerId,
   stream
 ) {
@@ -1882,12 +1368,11 @@ function showRemoteMedia(
       `video-${peerId}`
     );
 
+
   if (!card) {
 
     card =
-      document.createElement(
-        "div"
-      );
+      document.createElement("div");
 
     card.className =
       "video-card";
@@ -1895,160 +1380,119 @@ function showRemoteMedia(
     card.id =
       `video-${peerId}`;
 
+
     const video =
-      document.createElement(
-        "video"
-      );
+      document.createElement("video");
 
-    video.autoplay =
-      true;
+    video.autoplay = true;
 
-    video.playsInline =
-      true;
+    video.playsInline = true;
 
-    video.controls =
-      false;
+    video.controls = false;
 
     /*
      * IMPORTANTE:
-     *
-     * Não mutamos o vídeo remoto.
-     *
-     * Assim o usuário consegue ouvir
-     * a outra pessoa.
-     *
-     * Porém nunca adicionamos nosso
-     * próprio stream aqui.
+     * Não mutamos vídeos remotos.
+     * Isso permite ouvir os participantes.
      */
 
-    video.muted =
-      false;
+    video.muted = false;
 
-    video.volume =
-      1;
+    video.volume = 1;
 
-    card.appendChild(
-      video
-    );
+
+    card.appendChild(video);
+
 
     const name =
-      document.createElement(
-        "div"
-      );
+      document.createElement("div");
 
     name.className =
       "video-name";
 
+
     const participant =
-      participants.get(
-        peerId
-      );
+      participants.get(peerId);
+
 
     name.textContent =
       participant?.name ||
       "Participante";
 
-    card.appendChild(
-      name
-    );
+
+    card.appendChild(name);
+
+
+    videos.appendChild(card);
+
+
+    video.srcObject = stream;
+
 
     /*
-     * Botão de áudio.
+     * Tenta iniciar automaticamente.
      */
 
-    const audioButton =
-      document.createElement(
-        "button"
-      );
+    video.play()
+      .catch(() => {
 
-    audioButton.className =
-      "remote-audio-button";
+        /*
+         * Se o navegador bloquear autoplay,
+         * o usuário pode clicar.
+         */
 
-    audioButton.type =
-      "button";
+        card.classList.add(
+          "audio-locked"
+        );
 
-    audioButton.textContent =
-      "🔊 Áudio";
+      });
 
-    audioButton.addEventListener(
+
+    card.addEventListener(
       "click",
-      event => {
+      () => {
 
-        event.stopPropagation();
+        video.muted = false;
 
-        video.muted =
-          false;
-
-        video.volume =
-          1;
+        video.volume = 1;
 
         video.play()
-          .catch(
-            () => {}
-          );
+          .catch(() => {});
 
       }
     );
 
-    card.appendChild(
-      audioButton
-    );
-
-    videos.appendChild(
-      card
-    );
-
-    video.srcObject =
-      stream;
-
-    video.play()
-      .catch(
-        () => {
-
-          /*
-           * Alguns navegadores bloqueiam
-           * autoplay com áudio.
-           */
-
-          audioButton.classList.add(
-            "show"
-          );
-
-        }
-      );
 
   } else {
 
     const video =
-      card.querySelector(
-        "video"
-      );
+      card.querySelector("video");
 
     if (
       video &&
-      video.srcObject !==
-      stream
+      video.srcObject !== stream
     ) {
 
-      video.srcObject =
-        stream;
+      video.srcObject = stream;
+
+      video.play()
+        .catch(() => {});
 
     }
 
   }
 
-  emptyState?.classList.add(
-    "hidden"
-  );
+
+  emptyState?.classList.add("hidden");
+
 }
+
 
 /* =========================================================
    REMOVER VÍDEO
 ========================================================= */
 
-function removeVideo(
-  peerId
-) {
+function removeVideo(peerId) {
 
   const card =
     document.getElementById(
@@ -2056,21 +1500,9 @@ function removeVideo(
     );
 
   if (card) {
-
-    const video =
-      card.querySelector(
-        "video"
-      );
-
-    if (video) {
-
-      video.srcObject =
-        null;
-
-    }
-
     card.remove();
   }
+
 
   if (
     videos &&
@@ -2082,13 +1514,19 @@ function removeVideo(
     );
 
   }
+
 }
+
 
 /* =========================================================
    COMPARTILHAR TELA
 ========================================================= */
 
 async function startScreenShare() {
+
+  /*
+   * CELULAR NÃO TRANSMITE.
+   */
 
   if (isMobile) {
 
@@ -2097,20 +1535,18 @@ async function startScreenShare() {
     );
 
     return;
-
   }
 
-  if (
-    localScreenStream
-  ) {
+
+  if (localScreenStream) {
 
     toast(
       "Você já está compartilhando."
     );
 
     return;
-
   }
+
 
   if (
     !navigator.mediaDevices ||
@@ -2122,8 +1558,8 @@ async function startScreenShare() {
     );
 
     return;
-
   }
+
 
   try {
 
@@ -2131,42 +1567,38 @@ async function startScreenShare() {
       await navigator.mediaDevices.getDisplayMedia({
 
         video: {
-
           frameRate: {
-
-            ideal:
-              30,
-
-            max:
-              60
-
+            ideal: 30,
+            max: 60
           }
-
         },
 
         /*
-         * Áudio do sistema.
+         * Tenta capturar áudio do sistema.
          */
-        audio:
-          true
+
+        audio: true
 
       });
+
 
     localScreenStream =
       stream;
 
+
     /*
-     * MOSTRAR A MINHA PRÓPRIA TELA.
+     * MOSTRAR MINHA PRÓPRIA TELA
      *
-     * Isso é local e não vai para o servidor.
+     * Isso não cria áudio duplicado porque
+     * o preview local fica SEM ÁUDIO.
      */
 
-    showLocalScreen(
-      stream
-    );
+    showLocalScreen(stream);
+
 
     const videoTrack =
       stream.getVideoTracks()[0];
+
 
     if (videoTrack) {
 
@@ -2174,50 +1606,97 @@ async function startScreenShare() {
         "ended",
         () => {
 
-          stopScreenShare(
-            true
-          );
+          stopScreenShare(true);
 
         }
       );
 
     }
 
+
     /*
-     * Enviar para cada participante.
+     * Enviar tela para todos os participantes.
      */
 
     for (
-      const [
-        peerId,
-        pc
-      ]
+      const [peerId, pc]
       of peers
     ) {
 
-      if (!pc) {
-        continue;
-      }
-
       /*
-       * Adiciona SOMENTE as tracks da tela.
+       * Evita adicionar a mesma tela
+       * duas vezes.
        */
 
-      for (
-        const track
-        of stream.getTracks()
-      ) {
+      const existingVideoSender =
+        pc.getSenders().find(
+          sender =>
+            sender.track &&
+            sender.track.kind === "video"
+        );
+
+      if (existingVideoSender) {
+
+        try {
+
+          await existingVideoSender.replaceTrack(
+            videoTrack
+          );
+
+        } catch {
+
+          pc.addTrack(
+            videoTrack,
+            stream
+          );
+
+        }
+
+      } else {
 
         pc.addTrack(
-          track,
+          videoTrack,
           stream
         );
 
       }
 
+
       /*
-       * Renegociação.
+       * Áudio da tela, se existir.
        */
+
+      const audioTracks =
+        stream.getAudioTracks();
+
+      for (
+        const audioTrack
+        of audioTracks
+      ) {
+
+        const hasAudioSender =
+          pc.getSenders().some(
+            sender =>
+              sender.track &&
+              sender.track.kind === "audio"
+          );
+
+        /*
+         * Só adiciona áudio da tela
+         * se ainda não houver áudio.
+         */
+
+        if (!hasAudioSender) {
+
+          pc.addTrack(
+            audioTrack,
+            stream
+          );
+
+        }
+
+      }
+
 
       try {
 
@@ -2230,16 +1709,13 @@ async function startScreenShare() {
 
         send({
 
-          type:
-            "signal",
+          type: "signal",
 
-          to:
-            peerId,
+          to: peerId,
 
           signal: {
 
-            type:
-              "offer",
+            type: "offer",
 
             sdp:
               pc.localDescription
@@ -2251,38 +1727,30 @@ async function startScreenShare() {
       } catch (error) {
 
         console.error(
-          "Erro renegociando tela:",
+          "Renegociação:",
           error
         );
 
       }
+
     }
 
-    /*
-     * Avisar servidor.
-     */
 
     send({
 
-      type:
-        "sharing",
+      type: "sharing",
 
-      value:
-        true
+      value: true
 
     });
 
-    shareBtn?.classList.add(
-      "hidden"
-    );
 
-    shareCenterBtn?.classList.add(
-      "hidden"
-    );
+    shareBtn?.classList.add("hidden");
 
-    stopShareBtn?.classList.remove(
-      "hidden"
-    );
+    shareCenterBtn?.classList.add("hidden");
+
+    stopShareBtn?.classList.remove("hidden");
+
 
     toast(
       "Transmissão iniciada."
@@ -2294,6 +1762,7 @@ async function startScreenShare() {
       "Compartilhamento:",
       error
     );
+
 
     if (
       error.name ===
@@ -2311,188 +1780,148 @@ async function startScreenShare() {
       );
 
     }
+
   }
+
 }
 
+
 /* =========================================================
-   MINHA TELA
+   MINHA PRÓPRIA TELA
 ========================================================= */
 
-function showLocalScreen(
-  stream
-) {
+function showLocalScreen(stream) {
 
-  /*
-   * Remove transmissão local anterior.
-   */
-
-  const old =
-    document.getElementById(
-      "local-screen-card"
-    );
-
-  if (old) {
-
-    old.remove();
-
+  if (!videos) {
+    return;
   }
 
-  const card =
-    document.createElement(
-      "div"
+
+  let card =
+    document.getElementById(
+      "local-screen"
     );
 
-  card.className =
-    "video-card local-screen-card";
 
-  card.id =
-    "local-screen-card";
+  if (!card) {
 
-  const video =
-    document.createElement(
-      "video"
-    );
+    card =
+      document.createElement("div");
 
-  video.autoplay =
-    true;
+    card.id =
+      "local-screen";
 
-  video.playsInline =
-    true;
+    card.className =
+      "video-card local-screen-card";
 
-  /*
-   * A própria tela não precisa
-   * tocar áudio para você.
-   *
-   * Isso ajuda a evitar retorno.
-   */
 
-  video.muted =
-    true;
+    const video =
+      document.createElement("video");
 
-  video.srcObject =
-    stream;
+    video.autoplay = true;
 
-  card.appendChild(
-    video
-  );
+    video.playsInline = true;
 
-  const name =
-    document.createElement(
-      "div"
-    );
+    video.muted = true;
 
-  name.className =
-    "video-name";
+    /*
+     * O preview local NÃO reproduz áudio.
+     * Isso evita ouvir sua própria voz/tela duas vezes.
+     */
 
-  name.textContent =
-    `${myName} — Sua tela`;
+    video.volume = 0;
 
-  card.appendChild(
-    name
-  );
+    video.srcObject = stream;
 
-  /*
-   * Colocar no começo da área de vídeos.
-   */
 
-  if (
-    videos.firstChild
-  ) {
+    const name =
+      document.createElement("div");
 
-    videos.insertBefore(
-      card,
-      videos.firstChild
-    );
+    name.className =
+      "video-name";
+
+    name.textContent =
+      `${myName} — Minha transmissão`;
+
+
+    card.appendChild(video);
+
+    card.appendChild(name);
+
+    videos.prepend(card);
+
 
   } else {
 
-    videos.appendChild(
-      card
-    );
+    const video =
+      card.querySelector("video");
+
+    if (video) {
+
+      video.srcObject =
+        stream;
+
+    }
 
   }
 
-  emptyState?.classList.add(
-    "hidden"
-  );
 
-  video.play()
-    .catch(
-      () => {}
-    );
+  emptyState?.classList.add("hidden");
 }
 
+
 /* =========================================================
-   PARAR TELA
+   PARAR COMPARTILHAMENTO
 ========================================================= */
 
 function stopScreenShare(
   notifyServer = true
 ) {
 
-  if (
-    localScreenStream
-  ) {
+  if (localScreenStream) {
 
     for (
-      const track
-      of localScreenStream.getTracks()
+      const track of
+      localScreenStream.getTracks()
     ) {
 
       try {
-
         track.stop();
-
       } catch {}
 
     }
 
-    localScreenStream =
-      null;
+    localScreenStream = null;
+
   }
 
+
   /*
-   * Remove a transmissão local da tela.
+   * Remover preview local.
    */
 
   const localCard =
     document.getElementById(
-      "local-screen-card"
+      "local-screen"
     );
 
-  if (localCard) {
+  localCard?.remove();
 
-    const video =
-      localCard.querySelector(
-        "video"
-      );
-
-    if (video) {
-
-      video.srcObject =
-        null;
-
-    }
-
-    localCard.remove();
-  }
 
   /*
-   * Remove somente tracks de vídeo
-   * que representam a tela.
+   * Remover somente os vídeos da tela.
+   * NÃO removeremos áudio do microfone.
    */
 
   for (
-    const pc
-    of peers.values()
+    const pc of peers.values()
   ) {
 
     const senders =
       pc.getSenders();
 
     for (
-      const sender
-      of senders
+      const sender of senders
     ) {
 
       const track =
@@ -2500,55 +1929,58 @@ function stopScreenShare(
 
       if (
         track &&
-        track.kind ===
-        "video"
+        track.kind === "video"
       ) {
 
         try {
-
-          pc.removeTrack(
-            sender
-          );
-
+          pc.removeTrack(sender);
         } catch {}
 
       }
 
     }
+
   }
 
-  if (
-    notifyServer
-  ) {
+
+  if (notifyServer) {
 
     send({
 
-      type:
-        "sharing",
+      type: "sharing",
 
-      value:
-        false
+      value: false
 
     });
 
   }
 
-  shareBtn?.classList.remove(
-    "hidden"
-  );
 
-  shareCenterBtn?.classList.remove(
-    "hidden"
-  );
+  shareBtn?.classList.remove("hidden");
 
-  stopShareBtn?.classList.add(
-    "hidden"
-  );
+  shareCenterBtn?.classList.remove("hidden");
+
+  stopShareBtn?.classList.add("hidden");
+
+
+  if (
+    videos &&
+    videos.children.length === 0
+  ) {
+
+    emptyState?.classList.remove(
+      "hidden"
+    );
+
+  }
+
 
   toast(
     "Transmissão encerrada."
   );
+
 }
+
 
 /* =========================================================
    MICROFONE
@@ -2556,21 +1988,25 @@ function stopScreenShare(
 
 async function toggleMicrophone() {
 
+  /*
+   * CELULAR NÃO USA MICROFONE.
+   */
+
   if (isMobile) {
 
     toast(
-      "No Android/iPhone o microfone está desativado."
+      "No celular o microfone está desativado."
     );
 
     return;
-
   }
+
 
   try {
 
     /*
-     * Primeira vez:
-     * solicitar microfone.
+     * PRIMEIRO CLIQUE:
+     * pede acesso ao microfone.
      */
 
     if (!localMicStream) {
@@ -2578,58 +2014,48 @@ async function toggleMicrophone() {
       localMicStream =
         await navigator.mediaDevices.getUserMedia({
 
-          audio: {
+          audio: true,
 
-            echoCancellation:
-              true,
-
-            noiseSuppression:
-              true,
-
-            autoGainControl:
-              true
-
-          },
-
-          video:
-            false
+          video: false
 
         });
 
-      /*
-       * Microfone ligado somente porque
-       * o usuário clicou.
-       */
 
-      micEnabled =
-        true;
+      micEnabled = true;
+
 
       /*
-       * Adicionar aos peers existentes.
+       * Adiciona o microfone aos peers.
        */
 
       for (
-        const [
-          peerId,
-          pc
-        ]
+        const [peerId, pc]
         of peers
       ) {
 
-        for (
-          const track
-          of localMicStream.getAudioTracks()
-        ) {
-
-          track.enabled =
-            true;
-
-          pc.addTrack(
-            track,
-            localMicStream
+        const alreadyAdded =
+          pc.getSenders().some(
+            sender =>
+              sender.track &&
+              sender.track.kind === "audio"
           );
 
+        if (!alreadyAdded) {
+
+          for (
+            const track
+            of localMicStream.getAudioTracks()
+          ) {
+
+            pc.addTrack(
+              track,
+              localMicStream
+            );
+
+          }
+
         }
+
 
         try {
 
@@ -2642,16 +2068,13 @@ async function toggleMicrophone() {
 
           send({
 
-            type:
-              "signal",
+            type: "signal",
 
-            to:
-              peerId,
+            to: peerId,
 
             signal: {
 
-              type:
-                "offer",
+              type: "offer",
 
               sdp:
                 pc.localDescription
@@ -2663,11 +2086,12 @@ async function toggleMicrophone() {
         } catch (error) {
 
           console.error(
-            "Erro adicionando microfone:",
+            "Microfone:",
             error
           );
 
         }
+
       }
 
     } else {
@@ -2679,6 +2103,7 @@ async function toggleMicrophone() {
       micEnabled =
         !micEnabled;
 
+
       for (
         const track
         of localMicStream.getAudioTracks()
@@ -2688,14 +2113,16 @@ async function toggleMicrophone() {
           micEnabled;
 
       }
+
     }
+
 
     updateMicButton();
 
+
     send({
 
-      type:
-        "mic",
+      type: "mic",
 
       muted:
         !micEnabled
@@ -2704,46 +2131,33 @@ async function toggleMicrophone() {
 
   } catch (error) {
 
-    console.error(
-      "Microfone:",
-      error
-    );
+    console.error(error);
 
     toast(
       "Não foi possível acessar o microfone."
     );
+
   }
+
 }
+
 
 /* =========================================================
    MUTE FORÇADO
 ========================================================= */
 
-function setLocalMute(
-  muted
-) {
+function setLocalMute(muted) {
 
   if (!localMicStream) {
 
     micEnabled =
       !muted;
 
-    /*
-     * Mas se o servidor mandou mutado,
-     * o estado deve permanecer desligado.
-     */
-
-    if (muted) {
-
-      micEnabled =
-        false;
-
-    }
-
     updateMicButton();
 
     return;
   }
+
 
   for (
     const track
@@ -2755,17 +2169,22 @@ function setLocalMute(
 
   }
 
+
   micEnabled =
     !muted;
 
+
   updateMicButton();
+
 
   toast(
     muted
       ? "Seu microfone foi silenciado."
       : "Seu microfone foi ativado."
   );
+
 }
+
 
 /* =========================================================
    BOTÃO MICROFONE
@@ -2776,6 +2195,7 @@ function updateMicButton() {
   if (!micBtn) {
     return;
   }
+
 
   if (micEnabled) {
 
@@ -2788,30 +2208,9 @@ function updateMicButton() {
       "<span>🔇</span> Microfone desligado";
 
   }
+
 }
 
-/* =========================================================
-   ESCONDER CONTROLES MOBILE
-========================================================= */
-
-function hideMobileControls() {
-
-  shareBtn?.classList.add(
-    "hidden"
-  );
-
-  shareCenterBtn?.classList.add(
-    "hidden"
-  );
-
-  stopShareBtn?.classList.add(
-    "hidden"
-  );
-
-  micBtn?.classList.add(
-    "hidden"
-  );
-}
 
 /* =========================================================
    CHAT
@@ -2832,74 +2231,63 @@ chatForm?.addEventListener(
 
     send({
 
-      type:
-        "chat",
+      type: "chat",
 
       text
 
     });
 
-    chatInput.value =
-      "";
+    chatInput.value = "";
 
   }
 );
 
-function addChatMessage(
-  message
-) {
+
+function addChatMessage(message) {
 
   if (!chatMessages) {
     return;
   }
 
-  const item =
-    document.createElement(
-      "div"
-    );
 
-  item.className =
-    "message";
+  const item =
+    document.createElement("div");
+
+  item.className = "message";
+
 
   const meta =
-    document.createElement(
-      "div"
-    );
+    document.createElement("div");
 
-  meta.className =
-    "meta";
+  meta.className = "meta";
 
   meta.textContent =
     message.from ||
     "Convidado";
 
-  const text =
-    document.createElement(
-      "div"
-    );
 
-  text.className =
-    "text";
+  const text =
+    document.createElement("div");
+
+  text.className = "text";
 
   text.textContent =
-    message.text ||
-    "";
+    message.text || "";
 
-  item.appendChild(
-    meta
-  );
 
-  item.appendChild(
-    text
-  );
+  item.appendChild(meta);
 
-  chatMessages.appendChild(
-    item
-  );
+  item.appendChild(text);
+
+
+  chatMessages.appendChild(item);
+
 
   chatMessages.scrollTop =
     chatMessages.scrollHeight;
+
 }
+
 
 /* =========================================================
    CONVITE
@@ -2920,6 +2308,7 @@ function getInviteUrl() {
   return url.toString();
 }
 
+
 async function copyInvite() {
 
   const invite =
@@ -2938,9 +2327,7 @@ async function copyInvite() {
   } catch {
 
     const textarea =
-      document.createElement(
-        "textarea"
-      );
+      document.createElement("textarea");
 
     textarea.value =
       invite;
@@ -2951,27 +2338,30 @@ async function copyInvite() {
 
     textarea.select();
 
-    document.execCommand(
-      "copy"
-    );
+    document.execCommand("copy");
 
     textarea.remove();
 
     toast(
       "Convite copiado!"
     );
+
   }
+
 }
+
 
 copyBtn?.addEventListener(
   "click",
   copyInvite
 );
 
+
 inviteBtn?.addEventListener(
   "click",
   copyInvite
 );
+
 
 /* =========================================================
    SAIR
@@ -2982,15 +2372,13 @@ leaveBtn?.addEventListener(
   leaveRoom
 );
 
+
 function leaveRoom() {
 
-  stopScreenShare(
-    false
-  );
+  stopScreenShare(false);
 
-  if (
-    localMicStream
-  ) {
+
+  if (localMicStream) {
 
     for (
       const track
@@ -2998,16 +2386,15 @@ function leaveRoom() {
     ) {
 
       try {
-
         track.stop();
-
       } catch {}
 
     }
 
-    localMicStream =
-      null;
+    localMicStream = null;
+
   }
+
 
   for (
     const pc
@@ -3015,56 +2402,45 @@ function leaveRoom() {
   ) {
 
     try {
-
       pc.close();
-
     } catch {}
 
   }
 
+
   peers.clear();
 
-  remoteStreams.clear();
-
-  remoteTracks.clear();
 
   if (socket) {
 
     try {
-
       socket.close();
-
     } catch {}
 
-    socket =
-      null;
+    socket = null;
+
   }
+
 
   participants.clear();
 
+
   if (videos) {
-
-    videos.innerHTML =
-      "";
-
+    videos.innerHTML = "";
   }
 
-  roomPage?.classList.add(
-    "hidden"
-  );
 
-  home?.classList.remove(
-    "hidden"
-  );
+  roomPage?.classList.add("hidden");
+
+  home?.classList.remove("hidden");
+
 
   const url =
     new URL(
       window.location.href
     );
 
-  url.searchParams.delete(
-    "room"
-  );
+  url.searchParams.delete("room");
 
   history.replaceState(
     {},
@@ -3072,22 +2448,21 @@ function leaveRoom() {
     url
   );
 
-  roomId =
-    "";
 
-  myPeerId =
-    "";
+  roomId = "";
 
-  isAdmin =
-    false;
+  myPeerId = "";
 
-  micEnabled =
-    false;
+  isAdmin = false;
+
+  micEnabled = false;
 
   updateMicButton();
 
   updateAdminInterface();
+
 }
+
 
 /* =========================================================
    BOTÕES
@@ -3098,61 +2473,83 @@ shareBtn?.addEventListener(
   startScreenShare
 );
 
+
 shareCenterBtn?.addEventListener(
   "click",
   startScreenShare
 );
 
+
 stopShareBtn?.addEventListener(
   "click",
   () => {
 
-    stopScreenShare(
-      true
-    );
+    stopScreenShare(true);
 
   }
 );
+
 
 micBtn?.addEventListener(
   "click",
   toggleMicrophone
 );
 
+
 /* =========================================================
-   CARREGAMENTO
+   SALVAR NOME
+========================================================= */
+
+function saveName(name) {
+
+  if (!name) {
+    return;
+  }
+
+  localStorage.setItem(
+    "hype_name",
+    name
+  );
+
+}
+
+
+nameHome?.addEventListener(
+  "change",
+  () => {
+
+    saveName(
+      nameHome.value.trim()
+    );
+
+  }
+);
+
+
+/* =========================================================
+   QUANDO ABRE
 ========================================================= */
 
 window.addEventListener(
   "load",
   () => {
 
-    /*
-     * Começa mutado.
-     */
-
-    micEnabled =
-      false;
-
-    updateMicButton();
+    const room =
+      getRoomFromUrl();
 
     const savedName =
       localStorage.getItem(
         "hype_name"
       );
 
-    if (
-      savedName &&
-      nameHome
-    ) {
+
+    if (savedName && nameHome) {
 
       nameHome.value =
         savedName;
 
     }
 
-    const room =
-      getRoomFromUrl();
 
     if (
       room &&
@@ -3166,39 +2563,38 @@ window.addEventListener(
 
     }
 
+
+    /*
+     * Celular:
+     * somente assistir.
+     */
+
     if (isMobile) {
 
-      hideMobileControls();
+      shareBtn?.classList.add(
+        "hidden"
+      );
 
-    }
+      shareCenterBtn?.classList.add(
+        "hidden"
+      );
 
-  }
-);
+      stopShareBtn?.classList.add(
+        "hidden"
+      );
 
-/* =========================================================
-   SALVAR NOME
-========================================================= */
-
-nameHome?.addEventListener(
-  "change",
-  () => {
-
-    const name =
-      nameHome.value.trim();
-
-    if (name) {
-
-      localStorage.setItem(
-        "hype_name",
-        name
+      micBtn?.classList.add(
+        "hidden"
       );
 
     }
+
   }
 );
 
+
 /* =========================================================
-   ANTES DE SAIR
+   SEGURANÇA
 ========================================================= */
 
 window.addEventListener(
@@ -3208,21 +2604,11 @@ window.addEventListener(
     if (socket) {
 
       try {
-
         socket.close();
-
       } catch {}
 
     }
 
   }
-);
-
-/* =========================================================
-   FINAL
-========================================================= */
-
-console.log(
-  "Hype Roleplay - app.js carregado corretamente."
 );
 ```
