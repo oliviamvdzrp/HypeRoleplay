@@ -1,4 +1,4 @@
-```javascript
+
 /* =========================================================
    HYPE ROLEPLAY
    COMPARTILHAMENTO DE TELA - WEBRTC
@@ -3497,4 +3497,4 @@ console.log(
         ? "CELULAR / ESPECTADOR"
         : "PC / TRANSMISSOR"
 );
-```
+
